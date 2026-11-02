@@ -1,0 +1,25 @@
+# Dependencias
+node_modules/
+.venv/
+venv/
+__pycache__/
+
+# Base de datos local (se regenera con datos demo)
+data/
+
+# Variables de entorno y secretos
+.env
+.env.*
+!.env.example
+
+# Builds y logs
+dist/
+build/
+*.log
+
+# Sistema / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/

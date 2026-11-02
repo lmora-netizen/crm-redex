@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CRM Redex · Capacidad y vacantes</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="barra-sup">
+    <div class="marca">
+      <span class="logo">R</span>
+      <div><strong>CRM Redex</strong><small>Capacidad y vacantes</small></div>
+    </div>
+    <nav class="pestanas" id="pestanas">
+      <button data-vista="tablero">Tablero</button>
+      <button data-vista="pipeline">Proveedores</button>
+      <button data-vista="onboarding">Onboarding</button>
+      <button data-vista="catalogos">Catálogos</button>
+    </nav>
+    <label class="usuario">
+      <span>Reclutador</span>
+      <select id="reclutador-activo" aria-label="Reclutador activo"></select>
+    </label>
+  </header>
+
+  <main id="vista"><p class="cargando">Cargando…</p></main>
+
+  <dialog id="modal"></dialog>
+  <div id="aviso" role="status" aria-live="polite"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
