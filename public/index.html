@@ -3,25 +3,28 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>CRM Redex · Capacidad y vacantes</title>
+  <title>CRM Redex · BDB Logística</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap">
   <link rel="stylesheet" href="styles.css">
 </head>
-<body>
+<body class="sin-sesion">
+  <section id="acceso" class="acceso"></section>
+
   <header class="barra-sup">
     <div class="marca">
-      <span class="logo">R</span>
-      <div><strong>CRM Redex</strong><small>Capacidad y vacantes</small></div>
+      <span class="logo">BDB</span>
+      <div><strong>CRM Redex</strong><small>Moviendo negocios, conectando caminos</small></div>
     </div>
     <nav class="pestanas" id="pestanas">
       <button data-vista="tablero">Tablero</button>
       <button data-vista="pipeline">Proveedores</button>
       <button data-vista="onboarding">Onboarding</button>
       <button data-vista="catalogos">Catálogos</button>
+      <button data-vista="usuarios" data-solo-admin hidden>Usuarios</button>
     </nav>
-    <label class="usuario">
-      <span>Reclutador</span>
-      <select id="reclutador-activo" aria-label="Reclutador activo"></select>
-    </label>
+    <div class="usuario" id="usuario-actual"></div>
   </header>
 
   <main id="vista"><p class="cargando">Cargando…</p></main>

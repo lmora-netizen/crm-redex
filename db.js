@@ -69,6 +69,26 @@ CREATE TABLE IF NOT EXISTS onboarding (
   s2_calificacion INTEGER CHECK (s2_calificacion BETWEEN 1 AND 5),
   s2_comentario TEXT
 );
+
+-- Accesos internos: los crea un administrador, no hay registro público
+CREATE TABLE IF NOT EXISTS usuarios (
+  id INTEGER PRIMARY KEY,
+  nombre TEXT NOT NULL,
+  usuario TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  hash TEXT NOT NULL,
+  rol TEXT NOT NULL CHECK (rol IN ('admin', 'reclutador')),
+  reclutador_id INTEGER REFERENCES reclutadores(id) ON DELETE SET NULL,
+  activo INTEGER NOT NULL DEFAULT 1,
+  creado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  ultimo_acceso TEXT
+);
+
+-- Se guarda el SHA-256 del token, nunca el token de la cookie
+CREATE TABLE IF NOT EXISTS sesiones (
+  token_hash TEXT PRIMARY KEY,
+  usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+  expira TEXT NOT NULL
+);
 `;
 
 function abrir() {
@@ -129,11 +149,8 @@ function sembrar(db) {
       tracto: insertar('tipos_vehiculo', { nombre: "Tractocamión 53'", descripcion: 'Caja de 53 pies, carretera' }),
     };
 
-    const rec = {
-      ana: insertar('reclutadores', { nombre: 'Ana Torres', email: 'ana.torres@example.com' }),
-      carlos: insertar('reclutadores', { nombre: 'Carlos Méndez', email: 'carlos.mendez@example.com' }),
-      sofia: insertar('reclutadores', { nombre: 'Sofía Ruiz', email: 'sofia.ruiz@example.com' }),
-    };
+    const rec = Object.fromEntries(['Nayrobis', 'Ismael', 'Mayte', 'Carla', 'Antonio']
+      .map(nombre => [nombre.toLowerCase(), insertar('reclutadores', { nombre })]));
 
     const vacante = (cliente_id, localidad_id, tipo_vehiculo_id, cantidad, arranque, notas = null) =>
       insertar('vacantes', { cliente_id, localidad_id, tipo_vehiculo_id, cantidad, fecha_arranque: dia(arranque), notas });
@@ -159,25 +176,25 @@ function sembrar(db) {
         s2_rendimiento: s2[0] ?? null, s2_calificacion: s2[1] ?? null, s2_comentario: s2[2] ?? null,
       });
 
-    onboarding(asignar(v[0], rec.ana, 'Transportes Rápidos del Valle', 4, -16, 'Operativo'), -16,
+    onboarding(asignar(v[0], rec.nayrobis, 'Transportes Rápidos del Valle', 4, -16, 'Operativo'), -16,
       [92, 4, 'Buen arranque; dos retrasos menores en la ruta norte.'],
       [97, 5, 'Cumplimiento estable, sin incidencias.']);
-    onboarding(asignar(v[0], rec.carlos, 'Logística Martínez', 3, -9, 'Operativo'), -9,
+    onboarding(asignar(v[0], rec.ismael, 'Logística Martínez', 3, -9, 'Operativo'), -9,
       [85, 3, 'Faltó documentación de una unidad los primeros días.']);
-    asignar(v[0], rec.ana, 'Fletes Unión', 2, 3, 'Cierre de contrato', 'Contrato en revisión legal.');
-    asignar(v[1], rec.sofia, 'Autotransportes Jalisco', 3, 7, 'En documentación', 'Pendientes pólizas de seguro.');
-    asignar(v[1], rec.sofia, 'TransOccidente', 2, 12, 'Prospección');
-    onboarding(asignar(v[2], rec.carlos, 'Carga Pesada Regio', 5, -14, 'Operativo'), -14,
+    asignar(v[0], rec.carla, 'Fletes Unión', 2, 3, 'Cierre de contrato', 'Contrato en revisión legal.');
+    asignar(v[1], rec.mayte, 'Autotransportes Jalisco', 3, 7, 'En documentación', 'Pendientes pólizas de seguro.');
+    asignar(v[1], rec.antonio, 'TransOccidente', 2, 12, 'Prospección');
+    onboarding(asignar(v[2], rec.ismael, 'Carga Pesada Regio', 5, -14, 'Operativo'), -14,
       [78, 3, 'Incidencias en tiempos de carga en CEDIS.'],
       [88, 4, 'Mejoró tras el ajuste de horarios.']);
-    asignar(v[2], rec.carlos, 'Fletes del Golfo', 2, 2, 'Cierre de contrato');
-    asignar(v[3], rec.ana, 'Grupo Logístico Cumbres', 4, 20, 'Prospección', 'Primera llamada agendada.');
-    asignar(v[4], rec.sofia, 'Envíos Urbanos CDMX', 6, 2, 'En documentación');
-    asignar(v[4], rec.ana, 'Última Milla Express', 4, 4, 'Cierre de contrato');
-    asignar(v[4], rec.carlos, 'Repartos Metropolitanos', 3, 6, 'Prospección');
-    asignar(v[5], rec.sofia, 'Transportes Angelópolis', 2, 30, 'Prospección');
-    onboarding(asignar(v[6], rec.ana, 'Logística Bajío', 4, -3, 'Operativo'), -3);
-    onboarding(asignar(v[6], rec.carlos, 'Mensajería Queretana', 2, -1, 'Operativo'), -1);
+    asignar(v[2], rec.antonio, 'Fletes del Golfo', 2, 2, 'Cierre de contrato');
+    asignar(v[3], rec.nayrobis, 'Grupo Logístico Cumbres', 4, 20, 'Prospección', 'Primera llamada agendada.');
+    asignar(v[4], rec.mayte, 'Envíos Urbanos CDMX', 6, 2, 'En documentación');
+    asignar(v[4], rec.carla, 'Última Milla Express', 4, 4, 'Cierre de contrato');
+    asignar(v[4], rec.antonio, 'Repartos Metropolitanos', 3, 6, 'Prospección');
+    asignar(v[5], rec.mayte, 'Transportes Angelópolis', 2, 30, 'Prospección');
+    onboarding(asignar(v[6], rec.carla, 'Logística Bajío', 4, -3, 'Operativo'), -3);
+    onboarding(asignar(v[6], rec.nayrobis, 'Mensajería Queretana', 2, -1, 'Operativo'), -1);
 
     db.exec('COMMIT');
   } catch (err) {

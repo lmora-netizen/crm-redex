@@ -3,6 +3,7 @@
 const path = require('node:path');
 const express = require('express');
 const { abrir, estaVacia, sembrar, dia, ESTADOS } = require('./db');
+const { crearAuth, HttpError } = require('./auth');
 
 const db = abrir();
 if (estaVacia(db)) {
@@ -15,12 +16,11 @@ app.use(express.json());
 app.use((req, res, next) => { req.body ??= {}; next(); });
 app.use(express.static(path.join(__dirname, 'public')));
 
-class HttpError extends Error {
-  constructor(status, message) {
-    super(message);
-    this.status = status;
-  }
-}
+// --- Acceso: todo /api, salvo /api/auth, requiere sesión ---
+const auth = crearAuth(db);
+app.use('/api/auth', auth.acceso);
+app.use('/api', auth.requerirSesion);
+app.use('/api/usuarios', auth.usuarios);
 
 // --- Validación de entrada ---
 
@@ -259,6 +259,7 @@ app.use((err, req, res, next) => {
         : 'Alguno de los registros seleccionados ya no existe.',
     });
   }
+  if (/UNIQUE.*usuarios\.usuario/.test(mensaje)) return res.status(409).json({ error: 'Ese nombre de usuario ya está en uso.' });
   if (/UNIQUE/.test(mensaje)) return res.status(409).json({ error: 'Ya existe un registro con ese nombre.' });
   console.error(err);
   res.status(500).json({ error: 'Error interno del servidor' });

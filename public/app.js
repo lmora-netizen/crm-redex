@@ -26,7 +26,12 @@ const ICONO = {
   ver: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 11a4 4 0 1 0-8 0 4 4 0 0 0 8 0zM3 21c1.5-3.5 5-5 9-5s7.5 1.5 9 5"/></svg>',
 };
 
+const ROLES = { admin: 'Administrador', reclutador: 'Reclutador' };
+const VISTAS = ['tablero', 'pipeline', 'onboarding', 'catalogos', 'usuarios'];
+
 const datos = {
+  usuario: null,
+  usuarios: [],
   vista: 'tablero',
   cat: { clientes: [], localidades: [], 'tipos-vehiculo': [], reclutadores: [] },
   vacantes: [],
@@ -66,6 +71,7 @@ async function api(metodo, url, cuerpo) {
     body: cuerpo ? JSON.stringify(cuerpo) : undefined,
   });
   const res = r.status === 204 ? null : await r.json().catch(() => null);
+  if (r.status === 401 && !url.startsWith('/api/auth/')) mostrarAcceso();
   if (!r.ok) throw new Error(res?.error || `Error ${r.status}`);
   return res;
 }
@@ -81,33 +87,38 @@ function aviso(mensaje, error = false) {
 
 // --- Carga y render ---
 
+const esAdmin = () => datos.usuario?.rol === 'admin';
+
 async function cargar() {
-  const [clientes, localidades, tipos, reclutadores, vacantes, asignaciones, onboarding] = await Promise.all([
+  const [clientes, localidades, tipos, reclutadores, vacantes, asignaciones, onboarding, usuarios] = await Promise.all([
     api('GET', '/api/clientes'), api('GET', '/api/localidades'), api('GET', '/api/tipos-vehiculo'),
     api('GET', '/api/reclutadores'), api('GET', '/api/vacantes'), api('GET', '/api/asignaciones'),
-    api('GET', '/api/onboarding'),
+    api('GET', '/api/onboarding'), esAdmin() ? api('GET', '/api/usuarios') : [],
   ]);
   Object.assign(datos.cat, { clientes, localidades, 'tipos-vehiculo': tipos, reclutadores });
-  Object.assign(datos, { vacantes, asignaciones, onboarding });
-  renderReclutadorActivo();
+  Object.assign(datos, { vacantes, asignaciones, onboarding, usuarios });
   render();
 }
 
 function render() {
+  if (datos.vista === 'usuarios' && !esAdmin()) datos.vista = 'tablero';
+  $$('#pestanas [data-solo-admin]').forEach(b => { b.hidden = !esAdmin(); });
   $$('#pestanas button').forEach(b => b.classList.toggle('activo', b.dataset.vista === datos.vista));
-  const vistas = { tablero: renderTablero, pipeline: renderPipeline, onboarding: renderOnboarding, catalogos: renderCatalogos };
+  renderUsuarioActual();
+  const vistas = { tablero: renderTablero, pipeline: renderPipeline, onboarding: renderOnboarding, catalogos: renderCatalogos, usuarios: renderUsuarios };
   vistas[datos.vista]($('#vista'));
 }
 
-function reclutadorActivo() {
-  const id = Number(almacen.get('reclutadorActivo'));
-  return datos.cat.reclutadores.some(r => r.id === id) ? id : datos.cat.reclutadores[0]?.id ?? '';
-}
+// Reclutador con el que se precargan los proveedores nuevos: el vinculado al usuario
+const reclutadorActivo = () => datos.usuario?.reclutador_id ?? '';
 
-function renderReclutadorActivo() {
-  const actual = reclutadorActivo();
-  $('#reclutador-activo').innerHTML = datos.cat.reclutadores
-    .map(r => `<option value="${r.id}" ${r.id === actual ? 'selected' : ''}>${esc(r.nombre)}</option>`).join('');
+function renderUsuarioActual() {
+  const u = datos.usuario;
+  $('#usuario-actual').innerHTML = `
+    <span class="avatar">${esc(iniciales(u.nombre))}</span>
+    <div class="usuario-datos"><strong>${esc(u.nombre)}</strong><small>${ROLES[u.rol]}</small></div>
+    <button type="button" class="btn-sup" data-accion="password">Contraseña</button>
+    <button type="button" class="btn-sup" data-accion="salir">Salir</button>`;
 }
 
 const opciones = ruta => datos.cat[ruta].map(x => ({ value: x.id, label: x.nombre }));
@@ -562,6 +573,141 @@ function renderCatalogos(el) {
   };
 }
 
+// --- Usuarios (solo administradores) ---
+
+function formUsuario(u) {
+  abrirFormulario({
+    titulo: u ? `Editar usuario · ${u.nombre}` : 'Nuevo usuario',
+    valores: u ?? { rol: 'reclutador', activo: 1 },
+    campos: [
+      { name: 'nombre', label: 'Nombre completo', required: true },
+      { name: 'usuario', label: 'Usuario de acceso', required: true, autocomplete: 'off', placeholder: 'ej. nayrobis' },
+      { name: 'password', label: u ? 'Nueva contraseña' : 'Contraseña', type: 'password', required: !u,
+        autocomplete: 'new-password', placeholder: u ? 'Vacío = no cambiar' : 'Mínimo 8 caracteres' },
+      { name: 'rol', label: 'Rol', type: 'select', required: true, opciones: Object.entries(ROLES).map(([value, label]) => ({ value, label })) },
+      { name: 'reclutador_id', label: 'Reclutador vinculado', type: 'select', opciones: opciones('reclutadores') },
+      ...(u ? [{ name: 'activo', label: 'Estado', type: 'select', required: true, opciones: [{ value: 1, label: 'Activo' }, { value: 0, label: 'Inactivo' }] }] : []),
+    ],
+    guardar: d => u ? api('PUT', `/api/usuarios/${u.id}`, d) : api('POST', '/api/usuarios', d),
+    exito: u ? 'Usuario actualizado' : 'Usuario creado. Comparte el usuario y la contraseña con la persona.',
+  });
+}
+
+function renderUsuarios(el) {
+  el.innerHTML = `
+    <section class="panel">
+      <div class="panel-cab">
+        <div>
+          <h2>Usuarios <span class="cuenta">${datos.usuarios.length}</span></h2>
+          <p class="sub">Crea aquí los accesos del equipo. Los administradores también pueden gestionar usuarios; los reclutadores no.</p>
+        </div>
+        <button class="btn primario" data-accion="nuevo">+ Nuevo usuario</button>
+      </div>
+      <div class="tabla-scroll">
+        <table class="tabla">
+          <thead><tr><th>Nombre</th><th>Usuario</th><th>Rol</th><th>Reclutador vinculado</th><th>Estado</th><th>Último acceso</th><th></th></tr></thead>
+          <tbody>
+            ${datos.usuarios.map(u => `
+              <tr class="${u.activo ? '' : 'inactivo'}">
+                <td><strong>${esc(u.nombre)}</strong>${u.id === datos.usuario.id ? ' <span class="chip info">Tú</span>' : ''}</td>
+                <td>${esc(u.usuario)}</td>
+                <td><span class="chip ${u.rol === 'admin' ? 'marca' : ''}">${ROLES[u.rol]}</span></td>
+                <td>${esc(u.reclutador) || '<span class="tenue">—</span>'}</td>
+                <td><span class="chip ${u.activo ? 'ok' : ''}">${u.activo ? 'Activo' : 'Inactivo'}</span></td>
+                <td>${u.ultimo_acceso ? new Date(u.ultimo_acceso.replace(' ', 'T') + 'Z').toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' }) : '<span class="tenue">Nunca</span>'}</td>
+                <td class="acciones-fila">
+                  <button class="icono" data-accion="editar" data-id="${u.id}" title="Editar">${ICONO.editar}</button>
+                  ${u.id === datos.usuario.id ? '' : `<button class="icono peligro" data-accion="borrar" data-id="${u.id}" title="Eliminar">${ICONO.borrar}</button>`}
+                </td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </section>`;
+
+  el.onchange = null;
+  el.onclick = e => {
+    const b = e.target.closest('[data-accion]');
+    if (!b) return;
+    const u = datos.usuarios.find(x => x.id === Number(b.dataset.id));
+    if (b.dataset.accion === 'nuevo') formUsuario();
+    if (b.dataset.accion === 'editar') formUsuario(u);
+    if (b.dataset.accion === 'borrar') eliminar(`/api/usuarios/${u.id}`, `¿Eliminar el usuario "${u.usuario}"? Perderá el acceso de inmediato.`, 'Usuario eliminado');
+  };
+}
+
+function formPassword() {
+  abrirFormulario({
+    titulo: 'Cambiar mi contraseña',
+    campos: [
+      { name: 'actual', label: 'Contraseña actual', type: 'password', required: true, autocomplete: 'current-password' },
+      { name: 'nueva', label: 'Nueva contraseña', type: 'password', required: true, autocomplete: 'new-password', placeholder: 'Mínimo 8 caracteres' },
+      { name: 'confirmar', label: 'Confirmar nueva contraseña', type: 'password', required: true, autocomplete: 'new-password' },
+    ],
+    guardar: d => {
+      if (d.nueva !== d.confirmar) throw new Error('Las contraseñas nuevas no coinciden');
+      return api('POST', '/api/auth/password', { actual: d.actual, nueva: d.nueva });
+    },
+    exito: 'Contraseña actualizada',
+  });
+}
+
+// --- Pantalla de acceso ---
+
+let temporizadorRefresco;
+
+function mostrarAcceso(necesitaConfiguracion = false) {
+  datos.usuario = null;
+  clearInterval(temporizadorRefresco);
+  if ($('#modal').open) $('#modal').close();
+  document.body.classList.add('sin-sesion');
+  const configurar = necesitaConfiguracion;
+  $('#acceso').innerHTML = `
+    <form class="tarjeta-acceso" novalidate>
+      <div class="acceso-marca"><span class="logo">BDB</span><div><strong>CRM Redex</strong><small>BDB Logística</small></div></div>
+      <h1>${configurar ? 'Configura el primer administrador' : 'Iniciar sesión'}</h1>
+      <p class="sub">${configurar
+        ? 'Aún no hay usuarios. Crea tu cuenta de administrador; después podrás dar de alta los accesos del equipo.'
+        : 'Usa el usuario y la contraseña que te dio el administrador.'}</p>
+      ${configurar ? '<label class="campo"><span>Nombre completo</span><input name="nombre" required autocomplete="name"></label>' : ''}
+      <label class="campo"><span>Usuario</span><input name="usuario" required autocomplete="username" autocapitalize="none"></label>
+      <label class="campo"><span>Contraseña</span><input name="password" type="password" required
+        autocomplete="${configurar ? 'new-password' : 'current-password'}" ${configurar ? 'placeholder="Mínimo 8 caracteres"' : ''}></label>
+      <p class="error" hidden></p>
+      <button type="submit" class="btn primario">${configurar ? 'Crear administrador y entrar' : 'Entrar'}</button>
+    </form>`;
+  const form = $('#acceso form');
+  form.onsubmit = async e => {
+    e.preventDefault();
+    if (!form.reportValidity()) return;
+    const boton = form.querySelector('button');
+    boton.disabled = true;
+    try {
+      const { usuario } = await api('POST', configurar ? '/api/auth/configurar' : '/api/auth/login', Object.fromEntries(new FormData(form)));
+      await entrar(usuario);
+    } catch (err) {
+      const p = form.querySelector('.error');
+      p.textContent = err.message;
+      p.hidden = false;
+      boton.disabled = false;
+    }
+  };
+  form.querySelector('input').focus();
+}
+
+async function entrar(usuario) {
+  datos.usuario = usuario;
+  document.body.classList.remove('sin-sesion');
+  $('#acceso').innerHTML = '';
+  await cargar();
+  // Refresca cada 30 s para ver lo que registran otros reclutadores, sin interrumpir la edición
+  clearInterval(temporizadorRefresco);
+  temporizadorRefresco = setInterval(() => {
+    const editando = document.activeElement?.matches('input, select, textarea');
+    if (!$('#modal').open && !editando && !document.hidden) cargar().catch(() => {});
+  }, 30000);
+}
+
 // --- Formularios genéricos ---
 
 function campoHTML(c, valor) {
@@ -571,13 +717,18 @@ function campoHTML(c, valor) {
   let control;
   if (c.type === 'select') {
     control = `<select id="${id}" name="${c.name}" ${req}>
-      <option value="">Selecciona…</option>
+      <option value="">${c.required ? 'Selecciona…' : 'Ninguno'}</option>
       ${c.opciones.map(o => `<option value="${esc(o.value)}" ${String(o.value) === String(v) ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
     </select>`;
   } else if (c.type === 'textarea') {
     control = `<textarea id="${id}" name="${c.name}" rows="3">${esc(v)}</textarea>`;
   } else {
-    control = `<input id="${id}" name="${c.name}" type="${c.type ?? 'text'}" value="${esc(v)}" ${c.min != null ? `min="${c.min}"` : ''} ${req}>`;
+    const extras = [
+      c.min != null ? `min="${c.min}"` : '',
+      c.autocomplete ? `autocomplete="${c.autocomplete}"` : '',
+      c.placeholder ? `placeholder="${esc(c.placeholder)}"` : '',
+    ].join(' ');
+    control = `<input id="${id}" name="${c.name}" type="${c.type ?? 'text'}" value="${c.type === 'password' ? '' : esc(v)}" ${extras} ${req}>`;
   }
   const ancho = c.ancho || c.type === 'textarea' ? 'ancho' : '';
   return `<label class="campo ${ancho}" for="${id}"><span>${esc(c.label)}${c.required ? ' *' : ''}</span>${control}</label>`;
@@ -642,17 +793,25 @@ $('#pestanas').addEventListener('click', e => {
   render();
 });
 
-$('#reclutador-activo').addEventListener('change', e => almacen.set('reclutadorActivo', e.target.value));
-
-const vistaGuardada = almacen.get('vista');
-if (['tablero', 'pipeline', 'onboarding', 'catalogos'].includes(vistaGuardada)) datos.vista = vistaGuardada;
-
-cargar().catch(err => {
-  $('#vista').innerHTML = `<p class="vacio">No se pudo conectar con el servidor: ${esc(err.message)}</p>`;
+$('#usuario-actual').addEventListener('click', async e => {
+  const accion = e.target.closest('[data-accion]')?.dataset.accion;
+  if (accion === 'password') formPassword();
+  if (accion === 'salir') {
+    await api('POST', '/api/auth/logout').catch(() => {});
+    mostrarAcceso();
+  }
 });
 
-// Refresca cada 30 s para ver lo que registran otros reclutadores, sin interrumpir la edición
-setInterval(() => {
-  const editando = document.activeElement?.matches('input, select, textarea');
-  if (!$('#modal').open && !editando && !document.hidden) cargar().catch(() => {});
-}, 30000);
+const vistaGuardada = almacen.get('vista');
+if (VISTAS.includes(vistaGuardada)) datos.vista = vistaGuardada;
+
+fetch('/api/auth/sesion')
+  .then(async r => {
+    const res = await r.json();
+    if (r.ok) return entrar(res.usuario);
+    mostrarAcceso(res.necesitaConfiguracion);
+  })
+  .catch(err => {
+    document.body.classList.add('sin-sesion');
+    $('#acceso').innerHTML = `<p class="vacio">No se pudo conectar con el servidor: ${esc(err.message)}</p>`;
+  });
