@@ -1,6 +1,7 @@
 :root {
   /* Paleta BDB Logística en tonos suaves: rojo de marca, carbón y grises cálidos */
-  --fondo: #f7f5f4;
+  --fondo: #faf6f0;
+  --panel-translucido: rgba(255, 255, 255, .94);
   --panel: #ffffff;
   --borde: #ebe5e3;
   --texto: #2b2627;
@@ -28,7 +29,12 @@
 }
 
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--fondo); font-size: 12px; line-height: 1.45; }
+body {
+  margin: 0; font-size: 12px; line-height: 1.45; background-color: var(--fondo);
+  /* Ilustración de fondo con un velo crema para que no compita con el texto */
+  background-image: linear-gradient(rgba(250, 246, 240, .84), rgba(250, 246, 240, .84)), url(img/fondo.jpg);
+  background-size: cover; background-position: center; background-attachment: fixed;
+}
 button, input, select, textarea { font: inherit; color: inherit; }
 h2, h3 { margin: 0; }
 .sub { margin: 4px 0 0; color: var(--tenue); font-size: 12px; }
@@ -42,10 +48,11 @@ h2, h3 { margin: 0; }
 }
 .marca { display: flex; align-items: center; gap: 10px; }
 .marca small { display: block; color: #bdb3b1; font-size: 11px; }
-.logo {
-  display: grid; place-items: center; height: 32px; padding: 0 10px; border-radius: 6px; background: var(--primario);
-  font-weight: 800; font-style: italic; font-size: 15px; letter-spacing: .02em; color: #fff;
+.placa-logo {
+  display: flex; align-items: center; background: #fff; padding: 4px 22px 4px 10px; border-radius: 8px 0 0 8px;
+  clip-path: polygon(0 0, 100% 0, calc(100% - 14px) 100%, 0 100%);
 }
+.placa-logo img { height: 40px; display: block; }
 .pestanas { display: flex; gap: 4px; flex: 1; flex-wrap: wrap; }
 .pestanas button {
   border: 0; background: transparent; color: #ddd5d3; padding: 8px 14px; border-radius: 8px; cursor: pointer;
@@ -70,7 +77,7 @@ main { padding: 20px 24px 48px; max-width: 1440px; margin: 0 auto; }
 .kpi.rojo { border-top-color: var(--rojo); }
 
 /* --- Paneles y tablas --- */
-.panel { background: var(--panel); border: 1px solid var(--borde); border-radius: var(--radio); box-shadow: var(--sombra); margin-bottom: 16px; }
+.panel { background: var(--panel-translucido); backdrop-filter: blur(3px); border: 1px solid var(--borde); border-radius: var(--radio); box-shadow: var(--sombra); margin-bottom: 16px; }
 .panel-cab { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; padding: 14px 16px; border-bottom: 1px solid var(--borde); }
 .panel-cab h2 { font-size: 14px; }
 .acciones { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
@@ -203,7 +210,7 @@ body.sin-sesion .barra-sup, body.sin-sesion main { display: none; }
 body:not(.sin-sesion) .acceso { display: none; }
 .acceso {
   min-height: 100vh; display: grid; place-items: center; padding: 24px 16px;
-  background: linear-gradient(160deg, var(--carbon) 0%, var(--carbon) 45%, #3a2b2a 100%);
+  background: linear-gradient(rgba(250, 246, 240, .55), rgba(250, 246, 240, .55)), url(img/fondo.jpg) center / cover;
 }
 .tarjeta-acceso {
   width: min(400px, 100%); background: var(--panel); border-radius: 14px; padding: 28px;
@@ -215,12 +222,127 @@ body:not(.sin-sesion) .acceso { display: none; }
 .tarjeta-acceso .error { margin: 0; }
 .acceso-marca { display: flex; align-items: center; gap: 10px; }
 .acceso-marca small { display: block; color: var(--tenue); font-size: 11px; }
-.acceso .vacio { color: #ddd5d3; }
+.acceso-marca img { height: 46px; }
+.acceso .vacio { color: var(--texto); }
+
+/* --- Controles segmentados y utilidades --- */
+.segmentado { display: inline-flex; border: 1px solid var(--borde); border-radius: 8px; overflow: hidden; background: #fff; }
+.segmentado button { border: 0; background: transparent; padding: 7px 12px; cursor: pointer; font-weight: 600; color: var(--tenue); }
+.segmentado button.activo { background: var(--primario); color: #fff; }
+.nowrap { white-space: nowrap; }
+.txt-ok { color: var(--verde); }
+.txt-aviso { color: #a36b14; }
+.txt-alerta { color: var(--rojo); }
+.avatar.grande { width: 38px; height: 38px; font-size: 13px; background: var(--primario); flex-shrink: 0; }
+
+/* --- Tablero agrupado por reclutador --- */
+.grupo { overflow: hidden; }
+.grupo-cab { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 14px 16px; border-bottom: 1px solid var(--borde); border-left: 4px solid var(--primario); }
+.grupo-titulo { flex: 1; min-width: 220px; }
+.grupo-titulo h2 { font-size: 15px; }
+.ciudades { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.ciudad { background: var(--gris-suave); color: var(--texto); border-radius: 10px; padding: 1px 8px; font-size: 11px; }
+.grupo-stats { display: flex; gap: 18px; }
+.grupo-stats div { text-align: center; }
+.grupo-stats strong { display: block; font-size: 16px; }
+.grupo-stats span { color: var(--tenue); font-size: 10.5px; text-transform: uppercase; letter-spacing: .03em; }
+.tabla-vacantes td { padding: 9px 12px; }
+.tabla-vacantes th { padding: 8px 12px; }
+.col-efectividad { min-width: 120px; }
+.col-efectividad .barra { margin-top: 6px; }
+.puntos-alta { display: inline-flex; gap: 3px; }
+.puntos-alta i { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid #cfc6c4; }
+.puntos-alta i.hecho { background: var(--verde); border-color: var(--verde); }
+.puntos-alta i.pendiente { background: var(--ambar-suave); border-color: var(--ambar); }
+
+/* --- Detalle de vacante y formularios amplios --- */
+.cifras { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 8px; }
+.cifras div { background: var(--gris-suave); border-radius: 8px; padding: 8px; text-align: center; }
+.cifras strong { display: block; font-size: 18px; }
+.cifras span { display: block; color: var(--tenue); font-size: 11px; }
+.datos-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 12px 0; }
+.datos-grid.dos { grid-template-columns: 1fr 1fr; }
+.dato span { display: block; color: var(--tenue); font-size: 11px; }
+.dato strong { font-weight: 600; }
+.alta-lista { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.seccion-form { grid-column: 1 / -1; margin: 6px 0 0; padding-top: 8px; border-top: 1px solid var(--borde); color: var(--primario-osc); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+.campos .seccion-form:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
+.campo.casilla { flex-direction: row; align-items: center; gap: 8px; align-self: end; padding-bottom: 8px; }
+.campo.casilla input { width: auto; }
+dialog:has(.formulario.amplio) { width: min(820px, calc(100vw - 32px)); }
+.formulario.amplio .campos { grid-template-columns: repeat(3, 1fr); max-height: 65vh; overflow: auto; }
+
+/* --- Resumen --- */
+.resumen-texto { padding: 14px 18px; font-size: 13px; }
+.resumen-texto p { margin: 0 0 6px; }
+.rejilla-resumen { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; align-items: start; }
+.columna-resumen .panel { margin-bottom: 16px; }
+.prioridades { list-style: none; margin: 0; padding: 6px 12px 12px; counter-reset: p; }
+.prioridades li { display: grid; grid-template-columns: 84px 1fr auto; gap: 10px; align-items: center; padding: 9px 6px; border-bottom: 1px solid var(--borde); }
+.prioridades li:last-child { border-bottom: 0; }
+.prioridades li.clic { cursor: pointer; }
+.prioridades li.clic:hover { background: #fdf6f5; }
+.prioridades li strong { display: block; }
+.prioridades li small { color: var(--tenue); }
+.prioridades .nivel { font-size: 10.5px; font-weight: 700; text-transform: uppercase; border-radius: 10px; padding: 2px 8px; text-align: center; background: var(--gris-suave); color: var(--tenue); }
+.prioridades .nivel-3 .nivel { background: var(--rojo-suave); color: var(--rojo); }
+.prioridades .nivel-2 .nivel { background: var(--ambar-suave); color: #a36b14; }
+.quien { color: var(--tenue); font-size: 11px; white-space: nowrap; }
+.pie-panel { padding: 0 18px 12px; }
+.focos { padding: 10px 16px 14px; }
+.foco { display: grid; grid-template-columns: 120px 1fr 90px; gap: 10px; align-items: center; padding: 4px 0; }
+.foco-nombre { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.foco-barra { height: 10px; background: var(--gris-suave); border-radius: 5px; overflow: hidden; }
+.foco-barra i { display: block; height: 100%; background: var(--primario); opacity: .75; border-radius: 5px; }
+.foco-num { color: var(--tenue); font-size: 11px; text-align: right; }
+.bitacora { list-style: none; margin: 0; padding: 6px 16px 12px; }
+.bitacora li { display: grid; grid-template-columns: 44px 140px 1fr auto; gap: 10px; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--borde); }
+.bitacora li:last-child { border-bottom: 0; }
+.bitacora .chip { margin: 0; text-align: center; }
+.hora { color: var(--tenue); font-variant-numeric: tabular-nums; }
+
+/* --- Pipeline: días de cierre y carriles por reclutador --- */
+.franja-cierre { display: flex; flex-wrap: wrap; gap: 0; overflow: hidden; }
+.franja-cierre > div { padding: 14px 18px; border-right: 1px solid var(--borde); }
+.franja-cierre span { display: block; color: var(--tenue); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+.franja-cierre strong { display: block; font-size: 22px; }
+.franja-cierre small { color: var(--tenue); }
+.cierre-principal { background: var(--carbon); color: #fff; min-width: 200px; }
+.cierre-principal strong { font-size: 28px; color: #fff; }
+.cierre-principal span, .cierre-principal small { color: #ddd5d3 !important; }
+.cierre-reclutadores { flex: 1; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; border-right: 0 !important; }
+.cierre-chip { display: inline-flex !important; flex-direction: column; background: var(--gris-suave); border-radius: 8px; padding: 6px 10px; text-transform: none !important; letter-spacing: 0 !important; color: var(--texto) !important; font-size: 12px !important; }
+.cierre-chip b { font-size: 12px; }
+.carril-cab { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 16px; border-bottom: 1px solid var(--borde); border-left: 4px solid var(--primario); }
+.carril-cab h2 { font-size: 14px; }
+.carril-cab small { color: var(--tenue); }
+.carril-stats { margin-left: auto; display: flex; gap: 14px; color: var(--tenue); }
+.carril-stats .destacado { background: var(--primario-suave); color: var(--primario-osc); border-radius: 10px; padding: 2px 10px; }
+.carril .kanban { padding: 12px; }
+.kanban.compacto .columna { min-height: 120px; }
+.tarjeta-cab { display: flex; justify-content: space-between; align-items: flex-start; gap: 6px; }
+.dias { font-size: 10.5px; font-weight: 700; white-space: nowrap; background: var(--gris-suave); color: var(--tenue); border-radius: 10px; padding: 1px 7px; }
+.dias.ok { background: var(--verde-suave); color: var(--verde); }
+.dias.aviso { background: var(--ambar-suave); color: #a36b14; }
+.dias.alerta { background: var(--rojo-suave); color: var(--rojo); }
+.reclutador-tarjeta { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; font-weight: 600; font-size: 11px; }
+.reclutador-tarjeta .avatar { width: 22px; height: 22px; font-size: 9.5px; }
+
+@media (max-width: 1000px) {
+  .rejilla-resumen { grid-template-columns: 1fr; }
+  .formulario.amplio .campos { grid-template-columns: 1fr 1fr; }
+}
 
 @media (max-width: 720px) {
   .barra-sup { padding: 10px 16px; gap: 10px; }
   main { padding: 16px; }
   .campos, .semana-campos { grid-template-columns: 1fr; }
   .usuario-datos { display: none; }
+  .grupo-stats { gap: 10px; }
+  .datos-grid, .cifras { grid-template-columns: 1fr 1fr; }
+  .bitacora li { grid-template-columns: 40px 1fr; }
+  .bitacora .desc { grid-column: 1 / -1; }
+  .prioridades li { grid-template-columns: 1fr; }
+  .formulario.amplio .campos { grid-template-columns: 1fr; }
   .rejilla-cat { grid-template-columns: 1fr; }
 }

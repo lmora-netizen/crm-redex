@@ -40,9 +40,27 @@ CREATE TABLE IF NOT EXISTS vacantes (
   cliente_id INTEGER NOT NULL REFERENCES clientes(id),
   localidad_id INTEGER NOT NULL REFERENCES localidades(id),
   tipo_vehiculo_id INTEGER NOT NULL REFERENCES tipos_vehiculo(id),
-  cantidad INTEGER NOT NULL CHECK (cantidad > 0),
-  fecha_arranque TEXT NOT NULL,
-  notas TEXT,
+  reclutador_id INTEGER REFERENCES reclutadores(id),  -- NULL = todo el equipo
+  esquema TEXT,
+  cantidad INTEGER NOT NULL CHECK (cantidad > 0),      -- objetivo de unidades
+  tentativo INTEGER NOT NULL DEFAULT 0,                -- tentativo de cierre
+  cerrados INTEGER NOT NULL DEFAULT 0,
+  tarifa_min REAL,
+  tarifa_max REAL,
+  direccion_origen TEXT,
+  km_diario TEXT,
+  tipo_ruta TEXT,
+  horario TEXT,
+  dias_operacion INTEGER,
+  fecha_arranque TEXT,                                 -- inicio de vigencia
+  inicio_inmediato INTEGER NOT NULL DEFAULT 0,
+  fecha_termino TEXT,                                  -- término de vigencia
+  notas TEXT,                                          -- comentarios
+  seguimiento TEXT,                                    -- seguimiento del proveedor
+  solicitud_usuario TEXT,
+  usuario_activo TEXT,
+  capacitacion_lp TEXT,
+  capacitacion_conciliacion TEXT,
   creado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -55,8 +73,26 @@ CREATE TABLE IF NOT EXISTS asignaciones (
   fecha_disponibilidad TEXT NOT NULL,
   estado TEXT NOT NULL CHECK (estado IN ('Prospección', 'En documentación', 'Cierre de contrato', 'Operativo')),
   notas TEXT,
-  actualizado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  actualizado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  creado_en TEXT,       -- fecha local en que se registró el proveedor
+  fecha_operativo TEXT  -- fecha local en que pasó a Operativo (días de cierre)
 );
+
+-- Bitácora de movimientos para el resumen diario. Sin llaves foráneas:
+-- conserva el registro aunque se borre la vacante o el proveedor.
+CREATE TABLE IF NOT EXISTS historial (
+  id INTEGER PRIMARY KEY,
+  fecha TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+  usuario TEXT,
+  tipo TEXT NOT NULL,
+  vacante_id INTEGER,
+  asignacion_id INTEGER,
+  reclutador_id INTEGER,
+  descripcion TEXT NOT NULL,
+  estado_anterior TEXT,
+  estado_nuevo TEXT
+);
+CREATE INDEX IF NOT EXISTS historial_fecha ON historial (fecha);
 
 -- Seguimiento de las dos primeras semanas tras pasar a Operativo
 CREATE TABLE IF NOT EXISTS onboarding (
@@ -96,7 +132,32 @@ function abrir() {
   const db = new DatabaseSync(ARCHIVO_DB);
   db.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;');
   db.exec(ESQUEMA);
+  migrar(db);
   return db;
+}
+
+// Columnas agregadas después de la primera versión
+function migrar(db) {
+  // La versión con columnas de la hoja de Google reemplaza las vacantes demo:
+  // se reconstruyen vacantes, proveedores y onboarding (los usuarios se conservan)
+  const colVacantes = db.prepare('PRAGMA table_info(vacantes)').all().map(c => c.name);
+  if (!colVacantes.includes('reclutador_id')) {
+    db.exec(`
+      DROP TABLE IF EXISTS onboarding; DROP TABLE IF EXISTS asignaciones; DROP TABLE IF EXISTS vacantes;
+      DELETE FROM historial;`);
+    db.exec(ESQUEMA);
+  }
+
+  const columnas = db.prepare('PRAGMA table_info(asignaciones)').all().map(c => c.name);
+  if (!columnas.includes('creado_en')) {
+    db.exec('ALTER TABLE asignaciones ADD COLUMN creado_en TEXT');
+    db.exec('UPDATE asignaciones SET creado_en = date(actualizado_en)');
+  }
+  if (!columnas.includes('fecha_operativo')) {
+    db.exec('ALTER TABLE asignaciones ADD COLUMN fecha_operativo TEXT');
+    db.exec(`UPDATE asignaciones SET fecha_operativo =
+      (SELECT fecha_ingreso FROM onboarding WHERE asignacion_id = asignaciones.id) WHERE estado = 'Operativo'`);
+  }
 }
 
 function estaVacia(db) {
@@ -122,7 +183,7 @@ function sembrar(db) {
   db.exec('BEGIN');
   try {
     db.exec(`
-      DELETE FROM onboarding; DELETE FROM asignaciones; DELETE FROM vacantes;
+      DELETE FROM historial; DELETE FROM onboarding; DELETE FROM asignaciones; DELETE FROM vacantes;
       DELETE FROM reclutadores; DELETE FROM tipos_vehiculo; DELETE FROM localidades; DELETE FROM clientes;
     `);
 
@@ -152,22 +213,30 @@ function sembrar(db) {
     const rec = Object.fromEntries(['Nayrobis', 'Ismael', 'Mayte', 'Carla', 'Antonio']
       .map(nombre => [nombre.toLowerCase(), insertar('reclutadores', { nombre })]));
 
-    const vacante = (cliente_id, localidad_id, tipo_vehiculo_id, cantidad, arranque, notas = null) =>
-      insertar('vacantes', { cliente_id, localidad_id, tipo_vehiculo_id, cantidad, fecha_arranque: dia(arranque), notas });
+    const vacante = (cliente_id, localidad_id, tipo_vehiculo_id, reclutador_id, cantidad, arranque, notas = null) =>
+      insertar('vacantes', {
+        cliente_id, localidad_id, tipo_vehiculo_id, reclutador_id, cantidad, esquema: 'Temporada',
+        fecha_arranque: dia(arranque), fecha_termino: dia(arranque + 60), notas,
+      });
 
     const v = [
-      vacante(cli.andina, loc.cdmx, tip.c35, 10, -20, 'Operación de última milla zona sur.'),
-      vacante(cli.andina, loc.gdl, tip.rabon, 6, 10),
-      vacante(cli.norte, loc.mty, tip.tracto, 8, -15, 'Ruta Monterrey – Laredo.'),
-      vacante(cli.norte, loc.mty, tip.torton, 4, 25),
-      vacante(cli.retail, loc.cdmx, tip.van, 12, 5, 'Temporada alta: requiere GPS y seguro de carga.'),
-      vacante(cli.retail, loc.pue, tip.c35, 5, 40),
-      vacante(cli.vida, loc.qro, tip.van, 6, -10, 'Unidades refrigeradas deseables.'),
-      vacante(cli.vida, loc.gdl, tip.c35, 3, 60),
+      vacante(cli.andina, loc.cdmx, tip.c35, rec.nayrobis, 10, -20, 'Operación de última milla zona sur.'),
+      vacante(cli.andina, loc.gdl, tip.rabon, rec.mayte, 6, 10),
+      vacante(cli.norte, loc.mty, tip.tracto, rec.ismael, 8, -15, 'Ruta Monterrey – Laredo.'),
+      vacante(cli.norte, loc.mty, tip.torton, rec.ismael, 4, 25),
+      vacante(cli.retail, loc.cdmx, tip.van, rec.carla, 12, 5, 'Temporada alta: requiere GPS y seguro de carga.'),
+      vacante(cli.retail, loc.pue, tip.c35, rec.mayte, 5, 40),
+      vacante(cli.vida, loc.qro, tip.van, rec.antonio, 6, -10, 'Unidades refrigeradas deseables.'),
+      vacante(cli.vida, loc.gdl, tip.c35, rec.carla, 3, 60),
     ];
 
-    const asignar = (vacante_id, reclutador_id, proveedor, unidades, disponible, estado, notas = null) =>
-      insertar('asignaciones', { vacante_id, reclutador_id, proveedor, unidades, fecha_disponibilidad: dia(disponible), estado, notas });
+    // creado / movido: días respecto a hoy en que se registró y en que tuvo su último cambio
+    const asignar = (vacante_id, reclutador_id, proveedor, unidades, disponible, estado, { creado, movido = creado, notas = null } = {}) =>
+      insertar('asignaciones', {
+        vacante_id, reclutador_id, proveedor, unidades, fecha_disponibilidad: dia(disponible), estado, notas,
+        creado_en: dia(creado), actualizado_en: `${dia(movido)} 16:00:00`,
+        fecha_operativo: estado === 'Operativo' ? dia(disponible) : null,
+      });
 
     const onboarding = (asignacion_id, ingreso, s1 = [], s2 = []) =>
       insertar('onboarding', {
@@ -176,25 +245,59 @@ function sembrar(db) {
         s2_rendimiento: s2[0] ?? null, s2_calificacion: s2[1] ?? null, s2_comentario: s2[2] ?? null,
       });
 
-    onboarding(asignar(v[0], rec.nayrobis, 'Transportes Rápidos del Valle', 4, -16, 'Operativo'), -16,
+    const a = {};
+    a.trv = asignar(v[0], rec.nayrobis, 'Transportes Rápidos del Valle', 4, -16, 'Operativo', { creado: -30, movido: -16 });
+    onboarding(a.trv, -16,
       [92, 4, 'Buen arranque; dos retrasos menores en la ruta norte.'],
       [97, 5, 'Cumplimiento estable, sin incidencias.']);
-    onboarding(asignar(v[0], rec.ismael, 'Logística Martínez', 3, -9, 'Operativo'), -9,
-      [85, 3, 'Faltó documentación de una unidad los primeros días.']);
-    asignar(v[0], rec.carla, 'Fletes Unión', 2, 3, 'Cierre de contrato', 'Contrato en revisión legal.');
-    asignar(v[1], rec.mayte, 'Autotransportes Jalisco', 3, 7, 'En documentación', 'Pendientes pólizas de seguro.');
-    asignar(v[1], rec.antonio, 'TransOccidente', 2, 12, 'Prospección');
-    onboarding(asignar(v[2], rec.ismael, 'Carga Pesada Regio', 5, -14, 'Operativo'), -14,
+    a.martinez = asignar(v[0], rec.ismael, 'Logística Martínez', 3, -9, 'Operativo', { creado: -21, movido: -9 });
+    onboarding(a.martinez, -9, [85, 3, 'Faltó documentación de una unidad los primeros días.']);
+    a.union = asignar(v[0], rec.carla, 'Fletes Unión', 2, 3, 'Cierre de contrato', { creado: -12, movido: -1, notas: 'Contrato en revisión legal.' });
+    a.jalisco = asignar(v[1], rec.mayte, 'Autotransportes Jalisco', 3, 7, 'En documentación', { creado: -18, movido: -11, notas: 'Pendientes pólizas de seguro.' });
+    a.occidente = asignar(v[1], rec.antonio, 'TransOccidente', 2, 12, 'Prospección', { creado: -5, movido: -5 });
+    a.regio = asignar(v[2], rec.ismael, 'Carga Pesada Regio', 5, -14, 'Operativo', { creado: -33, movido: -14 });
+    onboarding(a.regio, -14,
       [78, 3, 'Incidencias en tiempos de carga en CEDIS.'],
       [88, 4, 'Mejoró tras el ajuste de horarios.']);
-    asignar(v[2], rec.antonio, 'Fletes del Golfo', 2, 2, 'Cierre de contrato');
-    asignar(v[3], rec.nayrobis, 'Grupo Logístico Cumbres', 4, 20, 'Prospección', 'Primera llamada agendada.');
-    asignar(v[4], rec.mayte, 'Envíos Urbanos CDMX', 6, 2, 'En documentación');
-    asignar(v[4], rec.carla, 'Última Milla Express', 4, 4, 'Cierre de contrato');
-    asignar(v[4], rec.antonio, 'Repartos Metropolitanos', 3, 6, 'Prospección');
-    asignar(v[5], rec.mayte, 'Transportes Angelópolis', 2, 30, 'Prospección');
-    onboarding(asignar(v[6], rec.carla, 'Logística Bajío', 4, -3, 'Operativo'), -3);
-    onboarding(asignar(v[6], rec.nayrobis, 'Mensajería Queretana', 2, -1, 'Operativo'), -1);
+    a.golfo = asignar(v[2], rec.antonio, 'Fletes del Golfo', 2, 2, 'Cierre de contrato', { creado: -16, movido: -3 });
+    a.cumbres = asignar(v[3], rec.nayrobis, 'Grupo Logístico Cumbres', 4, 20, 'Prospección', { creado: -10, movido: -10, notas: 'Primera llamada agendada.' });
+    a.envios = asignar(v[4], rec.mayte, 'Envíos Urbanos CDMX', 6, 2, 'En documentación', { creado: -8, movido: -1 });
+    a.ultima = asignar(v[4], rec.carla, 'Última Milla Express', 4, 4, 'Cierre de contrato', { creado: -14, movido: -2 });
+    a.repartos = asignar(v[4], rec.antonio, 'Repartos Metropolitanos', 3, 6, 'Prospección', { creado: -1 });
+    a.angelopolis = asignar(v[5], rec.mayte, 'Transportes Angelópolis', 2, 30, 'Prospección', { creado: -4 });
+    a.bajio = asignar(v[6], rec.carla, 'Logística Bajío', 4, -3, 'Operativo', { creado: -15, movido: -3 });
+    onboarding(a.bajio, -3);
+    a.queretana = asignar(v[6], rec.nayrobis, 'Mensajería Queretana', 2, -1, 'Operativo', { creado: -12, movido: -1 });
+    onboarding(a.queretana, -1);
+
+    // Los cerrados de cada vacante son las unidades de sus proveedores en Operativo
+    db.exec(`UPDATE vacantes SET cerrados = (SELECT COALESCE(SUM(unidades), 0) FROM asignaciones
+      WHERE vacante_id = vacantes.id AND estado = 'Operativo')`);
+
+    // Bitácora: movimientos de los últimos días, sobre todo de ayer, para el resumen
+    const nombreRec = Object.fromEntries(Object.entries(rec).map(([k, id]) => [id, k[0].toUpperCase() + k.slice(1)]));
+    const evento = (dias, hora, tipo, { vacante_id = null, asignacion_id = null, reclutador_id = null, usuario = nombreRec[reclutador_id] ?? 'Administrador', ant = null, nuevo = null }, descripcion) =>
+      insertar('historial', {
+        fecha: `${dia(dias)} ${hora}:00`, usuario, tipo, vacante_id, asignacion_id, reclutador_id,
+        descripcion, estado_anterior: ant, estado_nuevo: nuevo,
+      });
+
+    evento(-3, '11:20', 'cambio_estado', { vacante_id: v[2], asignacion_id: a.golfo, reclutador_id: rec.antonio, ant: 'En documentación', nuevo: 'Cierre de contrato' },
+      'Fletes del Golfo pasó de En documentación a Cierre de contrato');
+    evento(-2, '13:05', 'cambio_estado', { vacante_id: v[4], asignacion_id: a.ultima, reclutador_id: rec.carla, ant: 'En documentación', nuevo: 'Cierre de contrato' },
+      'Última Milla Express pasó de En documentación a Cierre de contrato');
+    evento(-1, '09:15', 'asignacion_creada', { vacante_id: v[4], asignacion_id: a.repartos, reclutador_id: rec.antonio, nuevo: 'Prospección' },
+      'Nuevo proveedor Repartos Metropolitanos (3 u.) para Retail Express MX · Ciudad de México');
+    evento(-1, '10:40', 'cambio_estado', { vacante_id: v[4], asignacion_id: a.envios, reclutador_id: rec.mayte, ant: 'Prospección', nuevo: 'En documentación' },
+      'Envíos Urbanos CDMX pasó de Prospección a En documentación');
+    evento(-1, '12:30', 'cambio_estado', { vacante_id: v[0], asignacion_id: a.union, reclutador_id: rec.carla, ant: 'En documentación', nuevo: 'Cierre de contrato' },
+      'Fletes Unión pasó de En documentación a Cierre de contrato');
+    evento(-1, '15:10', 'cambio_estado', { vacante_id: v[6], asignacion_id: a.queretana, reclutador_id: rec.nayrobis, ant: 'Cierre de contrato', nuevo: 'Operativo' },
+      'Mensajería Queretana pasó de Cierre de contrato a Operativo (2 u.)');
+    evento(-1, '17:45', 'evaluacion', { vacante_id: v[0], asignacion_id: a.martinez, reclutador_id: rec.ismael },
+      'Evaluación semana 1 de Logística Martínez: 85% de cumplimiento, 3 de 5');
+    evento(-1, '18:20', 'vacante_creada', { vacante_id: v[7] },
+      'Nueva vacante: Farmacéutica Vida Plus · Guadalajara · Camioneta 3.5 t (3 u.)');
 
     db.exec('COMMIT');
   } catch (err) {

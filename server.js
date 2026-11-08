@@ -92,10 +92,25 @@ for (const [ruta, { tabla, campos }] of Object.entries(CATALOGOS)) {
   });
 }
 
+// --- Bitácora de movimientos (resumen diario) ---
+
+function registrar(req, tipo, { vacante_id = null, asignacion_id = null, reclutador_id = null, ant = null, nuevo = null }, descripcion) {
+  db.prepare(`
+    INSERT INTO historial (usuario, tipo, vacante_id, asignacion_id, reclutador_id, descripcion, estado_anterior, estado_nuevo)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(req.usuario?.nombre ?? null, tipo, vacante_id, asignacion_id, reclutador_id, descripcion, ant, nuevo);
+}
+
+app.get('/api/historial', (req, res) => {
+  const desde = fecha(req.query.desde, 'Desde', true);
+  const hasta = fecha(req.query.hasta, 'Hasta') ?? desde;
+  res.json(db.prepare('SELECT * FROM historial WHERE date(fecha) BETWEEN ? AND ? ORDER BY fecha DESC, id DESC').all(desde, hasta));
+});
+
 // --- Vacantes ---
 
 const SELECT_VACANTES = `
-  SELECT v.*, c.nombre AS cliente, l.nombre AS localidad, t.nombre AS tipo_vehiculo,
+  SELECT v.*, c.nombre AS cliente, l.nombre AS localidad, t.nombre AS tipo_vehiculo, r.nombre AS reclutador,
     COALESCE(SUM(CASE WHEN a.estado = 'Operativo' THEN a.unidades END), 0) AS unidades_operativas,
     COALESCE(SUM(CASE WHEN a.estado <> 'Operativo' THEN a.unidades END), 0) AS unidades_en_proceso,
     COUNT(a.id) AS proveedores
@@ -103,43 +118,91 @@ const SELECT_VACANTES = `
   JOIN clientes c ON c.id = v.cliente_id
   JOIN localidades l ON l.id = v.localidad_id
   JOIN tipos_vehiculo t ON t.id = v.tipo_vehiculo_id
+  LEFT JOIN reclutadores r ON r.id = v.reclutador_id
   LEFT JOIN asignaciones a ON a.vacante_id = v.id`;
 
 const obtenerVacante = id => db.prepare(`${SELECT_VACANTES} WHERE v.id = ? GROUP BY v.id`).get(id);
+
+function decimal(valor, etiqueta) {
+  if (valor == null || valor === '') return null;
+  const n = Number(valor);
+  if (!Number.isFinite(n) || n < 0) throw new HttpError(400, `${etiqueta} debe ser un número mayor o igual a 0`);
+  return n;
+}
+
+const CAMPOS_VACANTE = [
+  'cliente_id', 'localidad_id', 'tipo_vehiculo_id', 'reclutador_id', 'esquema', 'cantidad', 'tentativo', 'cerrados',
+  'tarifa_min', 'tarifa_max', 'direccion_origen', 'km_diario', 'tipo_ruta', 'horario', 'dias_operacion',
+  'fecha_arranque', 'inicio_inmediato', 'fecha_termino', 'notas', 'seguimiento',
+  'solicitud_usuario', 'usuario_activo', 'capacitacion_lp', 'capacitacion_conciliacion',
+];
 
 const leerVacante = b => ({
   cliente_id: entero(b.cliente_id, 'Cliente', { min: 1, obligatorio: true }),
   localidad_id: entero(b.localidad_id, 'Localidad', { min: 1, obligatorio: true }),
   tipo_vehiculo_id: entero(b.tipo_vehiculo_id, 'Tipo de vehículo', { min: 1, obligatorio: true }),
-  cantidad: entero(b.cantidad, 'Cantidad', { min: 1, obligatorio: true }),
-  fecha_arranque: fecha(b.fecha_arranque, 'Fecha de arranque', true),
-  notas: texto(b.notas, 'Notas'),
+  reclutador_id: entero(b.reclutador_id, 'Reclutador', { min: 1 }),
+  esquema: texto(b.esquema, 'Esquema'),
+  cantidad: entero(b.cantidad, 'Objetivo', { min: 1, obligatorio: true }),
+  tentativo: entero(b.tentativo, 'Tentativo de cierre') ?? 0,
+  cerrados: entero(b.cerrados, 'Cerrados') ?? 0,
+  tarifa_min: decimal(b.tarifa_min, 'Tarifa mínima'),
+  tarifa_max: decimal(b.tarifa_max, 'Tarifa máxima'),
+  direccion_origen: texto(b.direccion_origen, 'Dirección origen'),
+  km_diario: texto(b.km_diario, 'Km diario'),
+  tipo_ruta: texto(b.tipo_ruta, 'Tipo de ruta'),
+  horario: texto(b.horario, 'Horario'),
+  dias_operacion: entero(b.dias_operacion, 'Días de operación'),
+  fecha_arranque: fecha(b.fecha_arranque, 'Inicio de vigencia'),
+  inicio_inmediato: b.inicio_inmediato === true || b.inicio_inmediato === 'on' || String(b.inicio_inmediato) === '1' ? 1 : 0,
+  fecha_termino: fecha(b.fecha_termino, 'Término de vigencia'),
+  notas: texto(b.notas, 'Comentarios'),
+  seguimiento: texto(b.seguimiento, 'Seguimiento'),
+  solicitud_usuario: texto(b.solicitud_usuario, 'Solicitud de usuario'),
+  usuario_activo: texto(b.usuario_activo, 'Usuario activo'),
+  capacitacion_lp: texto(b.capacitacion_lp, 'Capacitación LP'),
+  capacitacion_conciliacion: texto(b.capacitacion_conciliacion, 'Capacitación conciliación'),
 });
 
+const nombreVacante = v => `${v.cliente} · ${v.localidad} · ${v.tipo_vehiculo}`;
+
 app.get('/api/vacantes', (req, res) => {
-  res.json(db.prepare(`${SELECT_VACANTES} GROUP BY v.id ORDER BY v.fecha_arranque, v.id`).all());
+  res.json(db.prepare(`${SELECT_VACANTES} GROUP BY v.id ORDER BY r.nombre IS NULL, r.nombre, l.nombre, c.nombre`).all());
 });
 
 app.post('/api/vacantes', (req, res) => {
-  const r = db.prepare(`
-    INSERT INTO vacantes (cliente_id, localidad_id, tipo_vehiculo_id, cantidad, fecha_arranque, notas)
-    VALUES (:cliente_id, :localidad_id, :tipo_vehiculo_id, :cantidad, :fecha_arranque, :notas)`).run(leerVacante(req.body));
-  res.status(201).json(obtenerVacante(r.lastInsertRowid));
+  const datos = leerVacante(req.body);
+  const r = db.prepare(`INSERT INTO vacantes (${CAMPOS_VACANTE}) VALUES (${CAMPOS_VACANTE.map(c => ':' + c)})`).run(datos);
+  const v = obtenerVacante(r.lastInsertRowid);
+  registrar(req, 'vacante_creada', { vacante_id: v.id, reclutador_id: v.reclutador_id }, `Nueva vacante: ${nombreVacante(v)} (${v.cantidad} u.)`);
+  res.status(201).json(v);
 });
 
 app.put('/api/vacantes/:id', (req, res) => {
   const id = idParam(req);
-  const r = db.prepare(`
-    UPDATE vacantes SET cliente_id = :cliente_id, localidad_id = :localidad_id, tipo_vehiculo_id = :tipo_vehiculo_id,
-      cantidad = :cantidad, fecha_arranque = :fecha_arranque, notas = :notas
-    WHERE id = :id`).run({ ...leerVacante(req.body), id });
-  if (!r.changes) throw new HttpError(404, 'Vacante no encontrada');
-  res.json(obtenerVacante(id));
+  const antes = obtenerVacante(id);
+  if (!antes) throw new HttpError(404, 'Vacante no encontrada');
+  const datos = leerVacante(req.body);
+  db.prepare(`UPDATE vacantes SET ${CAMPOS_VACANTE.map(c => `${c} = :${c}`)} WHERE id = :id`).run({ ...datos, id });
+  const v = obtenerVacante(id);
+  const cambios = [];
+  if (antes.cerrados !== v.cerrados) cambios.push(`cerrados ${antes.cerrados} → ${v.cerrados}`);
+  if (antes.cantidad !== v.cantidad) cambios.push(`objetivo ${antes.cantidad} → ${v.cantidad}`);
+  if (antes.tentativo !== v.tentativo) cambios.push(`tentativo ${antes.tentativo} → ${v.tentativo}`);
+  if (antes.reclutador_id !== v.reclutador_id) cambios.push(`reclutador → ${v.reclutador ?? 'Todo el equipo'}`);
+  if (CAMPOS_VACANTE.some(c => antes[c] !== v[c])) {
+    registrar(req, 'vacante_editada', { vacante_id: id, reclutador_id: v.reclutador_id },
+      `Vacante ${nombreVacante(v)} actualizada${cambios.length ? `: ${cambios.join(', ')}` : ''}`);
+  }
+  res.json(v);
 });
 
 app.delete('/api/vacantes/:id', (req, res) => {
-  const r = db.prepare('DELETE FROM vacantes WHERE id = ?').run(idParam(req));
-  if (!r.changes) throw new HttpError(404, 'Vacante no encontrada');
+  const id = idParam(req);
+  const v = obtenerVacante(id);
+  if (!v) throw new HttpError(404, 'Vacante no encontrada');
+  db.prepare('DELETE FROM vacantes WHERE id = ?').run(id);
+  registrar(req, 'vacante_eliminada', { vacante_id: id, reclutador_id: v.reclutador_id }, `Vacante eliminada: ${nombreVacante(v)}`);
   res.status(204).end();
 });
 
@@ -181,31 +244,63 @@ app.get('/api/asignaciones', (req, res) => {
   res.json(db.prepare(`${SELECT_ASIGNACIONES} ORDER BY a.actualizado_en DESC, a.id DESC`).all());
 });
 
+// Los cerrados de la vacante suman las unidades de sus proveedores en Operativo
+function ajustarCerrados(vacanteId, delta) {
+  if (vacanteId && delta) db.prepare('UPDATE vacantes SET cerrados = MAX(0, cerrados + ?) WHERE id = ?').run(delta, vacanteId);
+}
+const aporte = a => (a?.estado === 'Operativo' ? a.unidades : 0);
+const diasDesde = desde => Math.max(0, Math.round((new Date(dia()) - new Date(desde)) / 86400000));
+
 app.post('/api/asignaciones', (req, res) => {
   const datos = leerAsignacion(req.body);
   const r = db.prepare(`
-    INSERT INTO asignaciones (vacante_id, reclutador_id, proveedor, unidades, fecha_disponibilidad, estado, notas)
-    VALUES (:vacante_id, :reclutador_id, :proveedor, :unidades, :fecha_disponibilidad, :estado, :notas)`).run(datos);
-  asegurarOnboarding(r.lastInsertRowid, datos);
-  res.status(201).json(obtenerAsignacion(r.lastInsertRowid));
+    INSERT INTO asignaciones (vacante_id, reclutador_id, proveedor, unidades, fecha_disponibilidad, estado, notas, creado_en, fecha_operativo)
+    VALUES (:vacante_id, :reclutador_id, :proveedor, :unidades, :fecha_disponibilidad, :estado, :notas, :creado_en, :fecha_operativo)`)
+    .run({ ...datos, creado_en: dia(), fecha_operativo: datos.estado === 'Operativo' ? dia() : null });
+  const id = Number(r.lastInsertRowid);
+  asegurarOnboarding(id, datos);
+  ajustarCerrados(datos.vacante_id, aporte(datos));
+  const a = obtenerAsignacion(id);
+  registrar(req, 'asignacion_creada', { vacante_id: a.vacante_id, asignacion_id: id, reclutador_id: a.reclutador_id, nuevo: a.estado },
+    `Nuevo proveedor ${a.proveedor} (${a.unidades} u.) en ${a.estado} para ${a.cliente} · ${a.localidad}`);
+  res.status(201).json(a);
 });
 
 app.put('/api/asignaciones/:id', (req, res) => {
   const id = idParam(req);
+  const antes = obtenerAsignacion(id);
+  if (!antes) throw new HttpError(404, 'Asignación no encontrada');
   const datos = leerAsignacion(req.body);
-  const r = db.prepare(`
+  const pasaAOperativo = datos.estado === 'Operativo' && antes.estado !== 'Operativo';
+  const fechaOperativo = datos.estado !== 'Operativo' ? null : pasaAOperativo ? dia() : antes.fecha_operativo ?? dia();
+  db.prepare(`
     UPDATE asignaciones SET vacante_id = :vacante_id, reclutador_id = :reclutador_id, proveedor = :proveedor,
       unidades = :unidades, fecha_disponibilidad = :fecha_disponibilidad, estado = :estado, notas = :notas,
-      actualizado_en = CURRENT_TIMESTAMP
-    WHERE id = :id`).run({ ...datos, id });
-  if (!r.changes) throw new HttpError(404, 'Asignación no encontrada');
+      fecha_operativo = :fecha_operativo, actualizado_en = CURRENT_TIMESTAMP
+    WHERE id = :id`).run({ ...datos, fecha_operativo: fechaOperativo, id });
   asegurarOnboarding(id, datos);
-  res.json(obtenerAsignacion(id));
+  ajustarCerrados(antes.vacante_id, -aporte(antes));
+  ajustarCerrados(datos.vacante_id, aporte(datos));
+  const a = obtenerAsignacion(id);
+  if (antes.estado !== a.estado) {
+    const detalle = pasaAOperativo ? ` (${a.unidades} u., cerrado en ${diasDesde(a.creado_en ?? dia())} días)` : '';
+    registrar(req, 'cambio_estado', { vacante_id: a.vacante_id, asignacion_id: id, reclutador_id: a.reclutador_id, ant: antes.estado, nuevo: a.estado },
+      `${a.proveedor} pasó de ${antes.estado} a ${a.estado}${detalle}`);
+  } else {
+    registrar(req, 'asignacion_editada', { vacante_id: a.vacante_id, asignacion_id: id, reclutador_id: a.reclutador_id },
+      `Se actualizaron los datos de ${a.proveedor}`);
+  }
+  res.json(a);
 });
 
 app.delete('/api/asignaciones/:id', (req, res) => {
-  const r = db.prepare('DELETE FROM asignaciones WHERE id = ?').run(idParam(req));
-  if (!r.changes) throw new HttpError(404, 'Asignación no encontrada');
+  const id = idParam(req);
+  const a = obtenerAsignacion(id);
+  if (!a) throw new HttpError(404, 'Asignación no encontrada');
+  db.prepare('DELETE FROM asignaciones WHERE id = ?').run(id);
+  ajustarCerrados(a.vacante_id, -aporte(a));
+  registrar(req, 'asignacion_eliminada', { vacante_id: a.vacante_id, asignacion_id: id, reclutador_id: a.reclutador_id },
+    `Se quitó al proveedor ${a.proveedor} de ${a.cliente} · ${a.localidad}`);
   res.status(204).end();
 });
 
@@ -236,13 +331,22 @@ app.put('/api/onboarding/:id', (req, res) => {
     datos[`s${s}_calificacion`] = entero(b[`s${s}_calificacion`], `Evaluación semana ${s}`, { min: 1, max: 5 });
     datos[`s${s}_comentario`] = texto(b[`s${s}_comentario`], `Comentario semana ${s}`);
   }
+  const antes = db.prepare(`${SELECT_ONBOARDING} AND o.asignacion_id = ?`).get(id);
   const r = db.prepare(`
     UPDATE onboarding SET fecha_ingreso = :fecha_ingreso,
       s1_rendimiento = :s1_rendimiento, s1_calificacion = :s1_calificacion, s1_comentario = :s1_comentario,
       s2_rendimiento = :s2_rendimiento, s2_calificacion = :s2_calificacion, s2_comentario = :s2_comentario
     WHERE asignacion_id = :id`).run(datos);
   if (!r.changes) throw new HttpError(404, 'Registro de onboarding no encontrado');
-  res.json(db.prepare(`${SELECT_ONBOARDING} AND o.asignacion_id = ?`).get(id));
+  const o = db.prepare(`${SELECT_ONBOARDING} AND o.asignacion_id = ?`).get(id);
+  for (const n of [1, 2]) {
+    const cal = `s${n}_calificacion`, ren = `s${n}_rendimiento`;
+    if (o[cal] != null && (antes?.[cal] !== o[cal] || antes?.[ren] !== o[ren])) {
+      registrar(req, 'evaluacion', { asignacion_id: id, reclutador_id: o.reclutador_id },
+        `Evaluación semana ${n} de ${o.proveedor}: ${o[ren] ?? '—'}% de cumplimiento, ${o[cal]} de 5`);
+    }
+  }
+  res.json(o);
 });
 
 // --- Errores ---

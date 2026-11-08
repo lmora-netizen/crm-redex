@@ -7,6 +7,9 @@ __pycache__/
 # Base de datos local (se regenera con datos demo)
 data/
 
+# Configuración local (enlace de la hoja de Google)
+config.local.json
+
 # Variables de entorno y secretos
 .env
 .env.*
