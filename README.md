@@ -1,17 +1,15 @@
 # CRM Redex
 
-Tablero de BDB Logística para coordinar la capacidad por vacante: qué reclutador atiende cada ciudad, el avance de los proveedores y el onboarding de sus primeras dos semanas.
+Tablero de BDB Logística para coordinar la capacidad por vacante: qué reclutador atiende cada ciudad, las etapas de contratación de los proveedores y el onboarding de sus primeras dos semanas.
 
 ## Secciones
 
-- **Resumen**: lo que pasó el día anterior (o el día que elijas), las prioridades para hoy ordenadas por urgencia y dónde concentrarse por ciudad y por reclutador.
-- **Tablero**: vacantes agrupadas por reclutador con sus ciudades, con las columnas de la hoja de capacidad: cliente, ciudad, vehículo, esquema, tarifa, vigencia, objetivo, tentativo, cerrados, % de efectividad y avance de alta y capacitación. Al hacer clic en una vacante se ven dirección, operación, comentarios, seguimiento y sus proveedores.
-- **Proveedores**: pipeline por estado (Prospección → En documentación → Cierre de contrato → Operativo), por reclutador o todo junto. Arriba muestra los días promedio de cierre (de registro a Operativo), en total y por reclutador. Al pasar a Operativo, las unidades se suman a los cerrados de la vacante.
-- **Onboarding**: proveedores en Operativo, con una columna por cada una de las dos semanas posteriores al ingreso para registrar rendimiento (% de cumplimiento), evaluación (1–5) y comentarios.
+- **Indicadores**: gráficas generales de avance (unidades cerradas contra objetivo) por cliente, tipo de unidad y reclutador; proveedores por etapa; y, por cliente, una matriz de ciudades × tipo de unidad con la cobertura de cada combinación.
+- **Tablero**: vacantes por cubrir, agrupadas por reclutador con sus ciudades y con las columnas de la hoja de capacidad. Cuando una vacante completa su objetivo sale del Tablero y pasa a Onboarding.
+- **Etapas de contratación**: Contactado → Seguimiento documentos → Firma de contrato → Operando, con las cuatro etapas siempre visibles, cuántos proveedores hay en cada una y cuánto tardan. Cada cambio de etapa se registra con fecha y hora para medir el tiempo por etapa y el tiempo total hasta Operando. Al pasar a Operando, las unidades se suman a los cerrados de la vacante.
+- **Onboarding**: vacantes cubiertas y proveedores en Operando, con una columna por cada una de las dos semanas posteriores al ingreso (rendimiento, evaluación y comentarios).
 - **Catálogos**: clientes, localidades, tipos de vehículo y reclutadores (con las ciudades que atiende cada uno).
 - **Usuarios** (solo administradores): accesos internos, rol, reclutador vinculado, activar/desactivar y restablecer contraseña.
-
-Cada alta, cambio de etapa, evaluación o edición de vacante queda en una bitácora; de ahí sale el Resumen.
 
 ## Usuarios y accesos
 
@@ -58,7 +56,7 @@ Para que otros reclutadores de la misma red entren desde su equipo, inicia el se
 
 ## Estructura
 
-- `server.js`: API REST (Express) y bitácora de movimientos.
+- `server.js`: API REST (Express), bitácora de movimientos y tramos por etapa.
 - `auth.js`: inicio de sesión, sesiones y gestión de usuarios.
 - `db.js`: esquema SQLite, migraciones y datos demo.
 - `importar-hoja.js`: importación de vacantes desde Google Sheets.

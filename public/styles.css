@@ -272,47 +272,7 @@ body:not(.sin-sesion) .acceso { display: none; }
 dialog:has(.formulario.amplio) { width: min(820px, calc(100vw - 32px)); }
 .formulario.amplio .campos { grid-template-columns: repeat(3, 1fr); max-height: 65vh; overflow: auto; }
 
-/* --- Resumen --- */
-.resumen-texto { padding: 14px 18px; font-size: 13px; }
-.resumen-texto p { margin: 0 0 6px; }
-.rejilla-resumen { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; align-items: start; }
-.columna-resumen .panel { margin-bottom: 16px; }
-.prioridades { list-style: none; margin: 0; padding: 6px 12px 12px; counter-reset: p; }
-.prioridades li { display: grid; grid-template-columns: 84px 1fr auto; gap: 10px; align-items: center; padding: 9px 6px; border-bottom: 1px solid var(--borde); }
-.prioridades li:last-child { border-bottom: 0; }
-.prioridades li.clic { cursor: pointer; }
-.prioridades li.clic:hover { background: #fdf6f5; }
-.prioridades li strong { display: block; }
-.prioridades li small { color: var(--tenue); }
-.prioridades .nivel { font-size: 10.5px; font-weight: 700; text-transform: uppercase; border-radius: 10px; padding: 2px 8px; text-align: center; background: var(--gris-suave); color: var(--tenue); }
-.prioridades .nivel-3 .nivel { background: var(--rojo-suave); color: var(--rojo); }
-.prioridades .nivel-2 .nivel { background: var(--ambar-suave); color: #a36b14; }
-.quien { color: var(--tenue); font-size: 11px; white-space: nowrap; }
-.pie-panel { padding: 0 18px 12px; }
-.focos { padding: 10px 16px 14px; }
-.foco { display: grid; grid-template-columns: 120px 1fr 90px; gap: 10px; align-items: center; padding: 4px 0; }
-.foco-nombre { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.foco-barra { height: 10px; background: var(--gris-suave); border-radius: 5px; overflow: hidden; }
-.foco-barra i { display: block; height: 100%; background: var(--primario); opacity: .75; border-radius: 5px; }
-.foco-num { color: var(--tenue); font-size: 11px; text-align: right; }
-.bitacora { list-style: none; margin: 0; padding: 6px 16px 12px; }
-.bitacora li { display: grid; grid-template-columns: 44px 140px 1fr auto; gap: 10px; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--borde); }
-.bitacora li:last-child { border-bottom: 0; }
-.bitacora .chip { margin: 0; text-align: center; }
-.hora { color: var(--tenue); font-variant-numeric: tabular-nums; }
-
-/* --- Pipeline: días de cierre y carriles por reclutador --- */
-.franja-cierre { display: flex; flex-wrap: wrap; gap: 0; overflow: hidden; }
-.franja-cierre > div { padding: 14px 18px; border-right: 1px solid var(--borde); }
-.franja-cierre span { display: block; color: var(--tenue); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
-.franja-cierre strong { display: block; font-size: 22px; }
-.franja-cierre small { color: var(--tenue); }
-.cierre-principal { background: var(--carbon); color: #fff; min-width: 200px; }
-.cierre-principal strong { font-size: 28px; color: #fff; }
-.cierre-principal span, .cierre-principal small { color: #ddd5d3 !important; }
-.cierre-reclutadores { flex: 1; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; border-right: 0 !important; }
-.cierre-chip { display: inline-flex !important; flex-direction: column; background: var(--gris-suave); border-radius: 8px; padding: 6px 10px; text-transform: none !important; letter-spacing: 0 !important; color: var(--texto) !important; font-size: 12px !important; }
-.cierre-chip b { font-size: 12px; }
+/* --- Etapas de contratación: carriles por reclutador --- */
 .carril-cab { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 16px; border-bottom: 1px solid var(--borde); border-left: 4px solid var(--primario); }
 .carril-cab h2 { font-size: 14px; }
 .carril-cab small { color: var(--tenue); }
@@ -328,8 +288,71 @@ dialog:has(.formulario.amplio) { width: min(820px, calc(100vw - 32px)); }
 .reclutador-tarjeta { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; font-weight: 600; font-size: 11px; }
 .reclutador-tarjeta .avatar { width: 22px; height: 22px; font-size: 9.5px; }
 
+/* --- Etapas de contratación: pasos visibles y tiempos --- */
+.etapas-panel { overflow: hidden; }
+.pasos { list-style: none; margin: 0; padding: 14px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; }
+.paso { position: relative; display: flex; gap: 10px; align-items: flex-start; padding: 12px 26px 12px 14px; background: var(--gris-suave);
+  clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 50%, calc(100% - 16px) 100%, 0 100%, 16px 50%); margin-left: -8px; }
+.paso:first-child { clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 50%, calc(100% - 16px) 100%, 0 100%); margin-left: 0; border-radius: 8px 0 0 8px; }
+.paso:not(:first-child) { padding-left: 28px; }
+.paso.prospeccion { background: #eeeae9; }
+.paso.documentacion { background: var(--ambar-suave); }
+.paso.cierre { background: var(--violeta-suave); }
+.paso.operativo { background: var(--verde-suave); }
+.paso-num { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: #fff; font-weight: 800; flex-shrink: 0; }
+.paso-nombre { display: block; font-weight: 700; font-size: 12px; }
+.paso-texto strong { display: block; font-size: 22px; line-height: 1.2; }
+.paso-texto small { display: block; color: var(--tenue); }
+.paso-tiempo { color: var(--texto) !important; font-weight: 600; margin-top: 2px; }
+.ciclo { display: flex; flex-wrap: wrap; border-top: 1px solid var(--borde); }
+.ciclo > div { flex: 1; min-width: 180px; padding: 12px 18px; border-right: 1px solid var(--borde); }
+.ciclo > div:first-child { background: var(--carbon); color: #fff; }
+.ciclo > div:last-child { border-right: 0; }
+.ciclo span { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--tenue); }
+.ciclo strong { display: block; font-size: 22px; }
+.ciclo small { color: var(--tenue); }
+.ciclo > div:first-child span, .ciclo > div:first-child small { color: #ddd5d3; }
+
+/* --- Indicadores: barras de avance y matrices de cobertura --- */
+.rejilla-graficas { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.rejilla-graficas .panel { margin: 0; }
+.avance-lista { padding: 12px 16px 16px; }
+.avance-fila { display: grid; grid-template-columns: 150px 1fr 110px; gap: 10px; align-items: center; padding: 5px 0; cursor: default; }
+.avance-fila:hover .avance-pista i { filter: brightness(.92); }
+.avance-nombre { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.avance-pista { height: 12px; background: var(--gris-suave); border-radius: 4px; overflow: hidden; }
+.avance-pista.sin-pista { background: transparent; }
+.avance-pista i { display: block; height: 100%; background: var(--primario); border-radius: 0 4px 4px 0; }
+.avance-valor { color: var(--tenue); font-size: 11px; text-align: right; font-variant-numeric: tabular-nums; }
+.avance-valor b { color: var(--texto); }
+.titulo-seccion { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin: 22px 0 10px; }
+.titulo-seccion h2 { font-size: 15px; }
+.leyenda-escala { display: flex; align-items: center; gap: 4px; color: var(--tenue); font-size: 11px; }
+.leyenda-escala i { width: 22px; height: 10px; border-radius: 2px; }
+.leyenda-escala small { margin-left: 8px; }
+.rejilla-matrices { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 16px; align-items: start; }
+.rejilla-matrices .panel { margin: 0; }
+.matriz { border-collapse: separate; border-spacing: 2px; margin: 8px 12px 12px; }
+.matriz th { font-size: 11px; color: var(--tenue); font-weight: 600; text-align: left; padding: 4px 8px; white-space: nowrap; }
+.matriz thead th { text-align: center; }
+.matriz td { min-width: 64px; height: 28px; text-align: center; font-weight: 700; font-variant-numeric: tabular-nums; border-radius: 4px; }
+.matriz td.celda-vacia { background: repeating-linear-gradient(45deg, transparent 0 4px, var(--gris-suave) 4px 5px); }
+.tooltip { position: fixed; top: 0; left: 0; z-index: 200; pointer-events: none; opacity: 0; transition: opacity .1s;
+  background: var(--carbon); color: #fff; padding: 6px 10px; border-radius: 6px; font-size: 11px; max-width: 280px; box-shadow: var(--sombra); }
+.tooltip.visible { opacity: 1; }
+
+/* --- Onboarding: vacantes cubiertas --- */
+.cubiertas { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; padding: 12px 16px 16px; }
+.cubierta { border: 1px solid var(--borde); border-left: 4px solid var(--verde); border-radius: 8px; padding: 10px 12px; background: #fff; cursor: pointer; display: flex; flex-direction: column; gap: 4px; }
+.cubierta:hover { border-color: #b9dcc8; }
+.cubierta-cab { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+.cubierta-cab .chip { margin: 0; }
+.cubierta-prov { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.enlace { border: 0; background: none; color: var(--primario-osc); font-weight: 700; cursor: pointer; padding: 0 0 0 6px; text-decoration: underline; }
+
 @media (max-width: 1000px) {
-  .rejilla-resumen { grid-template-columns: 1fr; }
+  .rejilla-graficas { grid-template-columns: 1fr; }
+  .pasos { grid-template-columns: 1fr 1fr; row-gap: 8px; }
   .formulario.amplio .campos { grid-template-columns: 1fr 1fr; }
 }
 
@@ -340,9 +363,7 @@ dialog:has(.formulario.amplio) { width: min(820px, calc(100vw - 32px)); }
   .usuario-datos { display: none; }
   .grupo-stats { gap: 10px; }
   .datos-grid, .cifras { grid-template-columns: 1fr 1fr; }
-  .bitacora li { grid-template-columns: 40px 1fr; }
-  .bitacora .desc { grid-column: 1 / -1; }
-  .prioridades li { grid-template-columns: 1fr; }
+  .avance-fila { grid-template-columns: 100px 1fr 90px; }
   .formulario.amplio .campos { grid-template-columns: 1fr; }
   .rejilla-cat { grid-template-columns: 1fr; }
 }

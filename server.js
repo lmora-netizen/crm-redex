@@ -111,8 +111,8 @@ app.get('/api/historial', (req, res) => {
 
 const SELECT_VACANTES = `
   SELECT v.*, c.nombre AS cliente, l.nombre AS localidad, t.nombre AS tipo_vehiculo, r.nombre AS reclutador,
-    COALESCE(SUM(CASE WHEN a.estado = 'Operativo' THEN a.unidades END), 0) AS unidades_operativas,
-    COALESCE(SUM(CASE WHEN a.estado <> 'Operativo' THEN a.unidades END), 0) AS unidades_en_proceso,
+    COALESCE(SUM(CASE WHEN a.estado = 'Operando' THEN a.unidades END), 0) AS unidades_operativas,
+    COALESCE(SUM(CASE WHEN a.estado <> 'Operando' THEN a.unidades END), 0) AS unidades_en_proceso,
     COUNT(a.id) AS proveedores
   FROM vacantes v
   JOIN clientes c ON c.id = v.cliente_id
@@ -210,7 +210,8 @@ app.delete('/api/vacantes/:id', (req, res) => {
 
 const SELECT_ASIGNACIONES = `
   SELECT a.*, r.nombre AS reclutador, v.cliente_id, c.nombre AS cliente, l.nombre AS localidad,
-    t.nombre AS tipo_vehiculo, v.cantidad AS cantidad_vacante, v.fecha_arranque
+    t.nombre AS tipo_vehiculo, v.cantidad AS cantidad_vacante, v.fecha_arranque,
+    (SELECT e.desde FROM etapas_asignacion e WHERE e.asignacion_id = a.id AND e.hasta IS NULL ORDER BY e.id DESC LIMIT 1) AS etapa_desde
   FROM asignaciones a
   JOIN vacantes v ON v.id = a.vacante_id
   JOIN clientes c ON c.id = v.cliente_id
@@ -233,9 +234,9 @@ const leerAsignacion = b => {
   };
 };
 
-// Al pasar a Operativo el proveedor entra a onboarding (se conserva si ya existía)
+// Al pasar a Operando el proveedor entra a onboarding (se conserva si ya existía)
 function asegurarOnboarding(id, datos) {
-  if (datos.estado !== 'Operativo') return;
+  if (datos.estado !== 'Operando') return;
   const ingreso = datos.fecha_disponibilidad <= dia() ? datos.fecha_disponibilidad : dia();
   db.prepare('INSERT OR IGNORE INTO onboarding (asignacion_id, fecha_ingreso) VALUES (?, ?)').run(id, ingreso);
 }
@@ -244,11 +245,24 @@ app.get('/api/asignaciones', (req, res) => {
   res.json(db.prepare(`${SELECT_ASIGNACIONES} ORDER BY a.actualizado_en DESC, a.id DESC`).all());
 });
 
-// Los cerrados de la vacante suman las unidades de sus proveedores en Operativo
+// Tramos de todas las etapas, para calcular el tiempo promedio en cada una
+app.get('/api/etapas', (req, res) => {
+  res.json(db.prepare(`
+    SELECT e.*, a.reclutador_id FROM etapas_asignacion e JOIN asignaciones a ON a.id = e.asignacion_id
+    ORDER BY e.asignacion_id, e.id`).all());
+});
+
+// Cierra el tramo de la etapa actual y abre el de la nueva
+function cambiarTramo(id, etapa) {
+  db.prepare("UPDATE etapas_asignacion SET hasta = datetime('now', 'localtime') WHERE asignacion_id = ? AND hasta IS NULL").run(id);
+  db.prepare("INSERT INTO etapas_asignacion (asignacion_id, etapa, desde) VALUES (?, ?, datetime('now', 'localtime'))").run(id, etapa);
+}
+
+// Los cerrados de la vacante suman las unidades de sus proveedores en Operando
 function ajustarCerrados(vacanteId, delta) {
   if (vacanteId && delta) db.prepare('UPDATE vacantes SET cerrados = MAX(0, cerrados + ?) WHERE id = ?').run(delta, vacanteId);
 }
-const aporte = a => (a?.estado === 'Operativo' ? a.unidades : 0);
+const aporte = a => (a?.estado === 'Operando' ? a.unidades : 0);
 const diasDesde = desde => Math.max(0, Math.round((new Date(dia()) - new Date(desde)) / 86400000));
 
 app.post('/api/asignaciones', (req, res) => {
@@ -256,8 +270,9 @@ app.post('/api/asignaciones', (req, res) => {
   const r = db.prepare(`
     INSERT INTO asignaciones (vacante_id, reclutador_id, proveedor, unidades, fecha_disponibilidad, estado, notas, creado_en, fecha_operativo)
     VALUES (:vacante_id, :reclutador_id, :proveedor, :unidades, :fecha_disponibilidad, :estado, :notas, :creado_en, :fecha_operativo)`)
-    .run({ ...datos, creado_en: dia(), fecha_operativo: datos.estado === 'Operativo' ? dia() : null });
+    .run({ ...datos, creado_en: dia(), fecha_operativo: datos.estado === 'Operando' ? dia() : null });
   const id = Number(r.lastInsertRowid);
+  cambiarTramo(id, datos.estado);
   asegurarOnboarding(id, datos);
   ajustarCerrados(datos.vacante_id, aporte(datos));
   const a = obtenerAsignacion(id);
@@ -271,13 +286,14 @@ app.put('/api/asignaciones/:id', (req, res) => {
   const antes = obtenerAsignacion(id);
   if (!antes) throw new HttpError(404, 'Asignación no encontrada');
   const datos = leerAsignacion(req.body);
-  const pasaAOperativo = datos.estado === 'Operativo' && antes.estado !== 'Operativo';
-  const fechaOperativo = datos.estado !== 'Operativo' ? null : pasaAOperativo ? dia() : antes.fecha_operativo ?? dia();
+  const pasaAOperativo = datos.estado === 'Operando' && antes.estado !== 'Operando';
+  const fechaOperativo = datos.estado !== 'Operando' ? null : pasaAOperativo ? dia() : antes.fecha_operativo ?? dia();
   db.prepare(`
     UPDATE asignaciones SET vacante_id = :vacante_id, reclutador_id = :reclutador_id, proveedor = :proveedor,
       unidades = :unidades, fecha_disponibilidad = :fecha_disponibilidad, estado = :estado, notas = :notas,
       fecha_operativo = :fecha_operativo, actualizado_en = CURRENT_TIMESTAMP
     WHERE id = :id`).run({ ...datos, fecha_operativo: fechaOperativo, id });
+  if (antes.estado !== datos.estado) cambiarTramo(id, datos.estado);
   asegurarOnboarding(id, datos);
   ajustarCerrados(antes.vacante_id, -aporte(antes));
   ajustarCerrados(datos.vacante_id, aporte(datos));
@@ -316,7 +332,7 @@ const SELECT_ONBOARDING = `
   JOIN localidades l ON l.id = v.localidad_id
   JOIN tipos_vehiculo t ON t.id = v.tipo_vehiculo_id
   JOIN reclutadores r ON r.id = a.reclutador_id
-  WHERE a.estado = 'Operativo'`;
+  WHERE a.estado = 'Operando'`;
 
 app.get('/api/onboarding', (req, res) => {
   res.json(db.prepare(`${SELECT_ONBOARDING} ORDER BY o.fecha_ingreso DESC`).all());

@@ -1,11 +1,11 @@
 'use strict';
 
-const ESTADOS = ['Prospección', 'En documentación', 'Cierre de contrato', 'Operativo'];
+const ESTADOS = ['Contactado', 'Seguimiento documentos', 'Firma de contrato', 'Operando'];
 const CLASE_ESTADO = {
-  'Prospección': 'prospeccion',
-  'En documentación': 'documentacion',
-  'Cierre de contrato': 'cierre',
-  'Operativo': 'operativo',
+  'Contactado': 'prospeccion',
+  'Seguimiento documentos': 'documentacion',
+  'Firma de contrato': 'cierre',
+  'Operando': 'operativo',
 };
 
 // `uso` indica qué colección y campo referencian a cada elemento del catálogo
@@ -28,14 +28,13 @@ const ICONO = {
 };
 
 const ROLES = { admin: 'Administrador', reclutador: 'Reclutador' };
-const VISTAS = ['resumen', 'tablero', 'pipeline', 'onboarding', 'catalogos', 'usuarios'];
+const VISTAS = ['indicadores', 'tablero', 'pipeline', 'onboarding', 'catalogos', 'usuarios'];
 
 const datos = {
   usuario: null,
   usuarios: [],
-  vista: 'resumen',
-  historial: [],
-  resumenFecha: null,
+  vista: 'indicadores',
+  etapas: [],
   agruparTablero: true,
   vistaPipeline: 'reclutador',
   cat: { clientes: [], localidades: [], 'tipos-vehiculo': [], reclutadores: [] },
@@ -95,14 +94,14 @@ function aviso(mensaje, error = false) {
 const esAdmin = () => datos.usuario?.rol === 'admin';
 
 async function cargar() {
-  const [clientes, localidades, tipos, reclutadores, vacantes, asignaciones, onboarding, usuarios, historial] = await Promise.all([
+  const [clientes, localidades, tipos, reclutadores, vacantes, asignaciones, onboarding, usuarios, etapas] = await Promise.all([
     api('GET', '/api/clientes'), api('GET', '/api/localidades'), api('GET', '/api/tipos-vehiculo'),
     api('GET', '/api/reclutadores'), api('GET', '/api/vacantes'), api('GET', '/api/asignaciones'),
     api('GET', '/api/onboarding'), esAdmin() ? api('GET', '/api/usuarios') : [],
-    api('GET', `/api/historial?desde=${datos.resumenFecha}`),
+    api('GET', '/api/etapas'),
   ]);
   Object.assign(datos.cat, { clientes, localidades, 'tipos-vehiculo': tipos, reclutadores });
-  Object.assign(datos, { vacantes, asignaciones, onboarding, usuarios, historial });
+  Object.assign(datos, { vacantes, asignaciones, onboarding, usuarios, etapas });
   render();
 }
 
@@ -111,7 +110,7 @@ function render() {
   $$('#pestanas [data-solo-admin]').forEach(b => { b.hidden = !esAdmin(); });
   $$('#pestanas button').forEach(b => b.classList.toggle('activo', b.dataset.vista === datos.vista));
   renderUsuarioActual();
-  const vistas = { resumen: renderResumen, tablero: renderTablero, pipeline: renderPipeline, onboarding: renderOnboarding, catalogos: renderCatalogos, usuarios: renderUsuarios };
+  const vistas = { indicadores: renderIndicadores, tablero: renderTablero, pipeline: renderPipeline, onboarding: renderOnboarding, catalogos: renderCatalogos, usuarios: renderUsuarios };
   vistas[datos.vista]($('#vista'));
 }
 
@@ -235,7 +234,7 @@ function gruposPorReclutador(lista, clave = 'reclutador_id') {
 
 function filtrarVacantes() {
   const { reclutador, cliente, localidad, esquema } = datos.filtros;
-  return datos.vacantes.filter(v =>
+  return datos.vacantes.filter(v => !vacanteCubierta(v) &&
     (!reclutador || (reclutador === 'equipo' ? v.reclutador_id == null : String(v.reclutador_id) === reclutador)) &&
     (!cliente || String(v.cliente_id) === cliente) &&
     (!localidad || String(v.localidad_id) === localidad) &&
@@ -305,7 +304,8 @@ function renderTablero(el) {
       <div class="panel-cab">
         <div>
           <h2>Capacidad por reclutador y ciudad</h2>
-          <p class="sub">Haz clic en una vacante para ver su detalle, la dirección y los proveedores asignados.</p>
+          <p class="sub">Vacantes por cubrir. Haz clic en una para ver su detalle y sus proveedores.
+            ${datos.vacantes.some(vacanteCubierta) ? `<button class="enlace" data-ir="onboarding">${plural(datos.vacantes.filter(vacanteCubierta).length, 'vacante cubierta pasó', 'vacantes cubiertas pasaron')} a Onboarding →</button>` : ''}</p>
         </div>
         <div class="acciones">
           ${selectFiltroLista('reclutador', 'Reclutador', [...datos.cat.reclutadores.map(r => [r.id, r.nombre]), ['equipo', SIN_RECLUTADOR]])}
@@ -349,6 +349,8 @@ function renderTablero(el) {
     if (f) { datos.filtros[f] = e.target.value; render(); }
   };
   el.onclick = e => {
+    const ir = e.target.closest('[data-ir]');
+    if (ir) { datos.vista = ir.dataset.ir; return render(); }
     const seg = e.target.closest('[data-agrupar]');
     if (seg) {
       datos.agruparTablero = seg.dataset.agrupar === '1';
@@ -491,181 +493,142 @@ function verVacante(id) {
   if (!modal.open) modal.showModal();
 }
 
-// --- Resumen del día anterior ---
+// --- Indicadores generales ---
 
-const TIPOS_EVENTO = {
-  asignacion_creada: ['Nuevo proveedor', 'info'],
-  cambio_estado: ['Cambio de etapa', 'marca'],
-  asignacion_editada: ['Proveedor actualizado', ''],
-  asignacion_eliminada: ['Proveedor eliminado', 'alerta'],
-  vacante_creada: ['Nueva vacante', 'info'],
-  vacante_editada: ['Vacante actualizada', ''],
-  vacante_eliminada: ['Vacante eliminada', 'alerta'],
-  evaluacion: ['Evaluación', 'ok'],
-  importacion: ['Importación', ''],
-};
+const vacanteCubierta = v => v.cerrados >= v.cantidad;
 
-function prioridades() {
-  const h = hoy();
-  const lista = [];
-  for (const v of datos.vacantes) {
-    const faltan = v.cantidad - v.cerrados;
-    if (faltan <= 0 || vigenciaConcluida(v)) continue;
-    const dias = v.fecha_arranque ? diasEntre(h, v.fecha_arranque) : null;
-    const sinLeads = v.cerrados === 0 && v.tentativo === 0 && !v.proveedores;
-    const extra = sinLeads ? ' · sin leads ni proveedores' : '';
-    const base = { titulo: nombreVacante(v), quien: nombreReclutador(v), vacante: v.id };
-    if (vacanteIniciada(v)) {
-      lista.push({ ...base, nivel: 3, peso: faltan * 10 + (dias != null ? -dias : 30),
-        detalle: `${v.inicio_inmediato ? 'Inicio inmediato' : dias === 0 ? 'Arrancó hoy' : `Arrancó hace ${plural(-dias, 'día', 'días')}`}: faltan ${faltan} de ${v.cantidad} unidades${extra}` });
-    } else if (dias != null && dias <= 7) {
-      lista.push({ ...base, nivel: 2, peso: faltan * 10 - dias,
-        detalle: `Arranca en ${plural(dias, 'día', 'días')}: faltan ${faltan} de ${v.cantidad} unidades${extra}` });
-    } else if (sinLeads) {
-      lista.push({ ...base, nivel: 2, peso: v.cantidad, detalle: `Sin leads ni proveedores; objetivo de ${v.cantidad} unidades` });
-    }
-  }
-  for (const v of datos.vacantes) {
-    if (!v.cerrados || vigenciaConcluida(v)) continue;
-    const pendientes = FASES_ALTA.filter(([campo]) => v[campo] === 'Pendiente').map(([, etiqueta]) => etiqueta);
-    if (pendientes.length) {
-      lista.push({ nivel: 1, peso: pendientes.length * v.cerrados, titulo: nombreVacante(v), quien: nombreReclutador(v), vacante: v.id,
-        detalle: `${plural(v.cerrados, 'cerrado', 'cerrados')} con alta pendiente: ${pendientes.join(', ')}` });
-    }
-  }
-  for (const a of datos.asignaciones) {
-    if (a.estado === 'Operativo') continue;
-    const d = diasEntre(String(a.actualizado_en).slice(0, 10), h);
-    if (d >= 5) lista.push({ nivel: 1, peso: d, titulo: a.proveedor, quien: a.reclutador, vacante: a.vacante_id, detalle: `${d} días sin movimiento en ${a.estado}` });
-  }
-  for (const o of datos.onboarding) {
-    for (const n of [1, 2]) {
-      if (semana(o, n).texto === 'Por evaluar') {
-        lista.push({ nivel: 1, peso: 1, titulo: o.proveedor, quien: o.reclutador, detalle: `Falta evaluar la semana ${n} de onboarding` });
-      }
-    }
-  }
-  return lista.sort((a, b) => b.nivel - a.nivel || b.peso - a.peso);
-}
-
-function focos(clave) {
+// Agrupa vacantes por una clave y suma objetivo y cerrados (los cerrados no pasan del objetivo)
+function sumarPor(lista, clave) {
   const mapa = new Map();
-  for (const v of datos.vacantes) {
-    if (vigenciaConcluida(v)) continue;
-    const nombre = clave === 'ciudad' ? v.localidad : nombreReclutador(v);
-    const f = mapa.get(nombre) ?? { nombre, objetivo: 0, cerrados: 0, faltan: 0 };
-    f.objetivo += v.cantidad;
-    f.cerrados += Math.min(v.cerrados, v.cantidad);
-    f.faltan += Math.max(0, v.cantidad - v.cerrados);
-    mapa.set(nombre, f);
+  for (const v of lista) {
+    const k = clave(v);
+    const g = mapa.get(k) ?? { nombre: k, objetivo: 0, cerrados: 0, vacantes: 0 };
+    g.objetivo += v.cantidad;
+    g.cerrados += Math.min(v.cerrados, v.cantidad);
+    g.vacantes += 1;
+    mapa.set(k, g);
   }
-  return [...mapa.values()].filter(f => f.faltan > 0).sort((a, b) => b.faltan - a.faltan);
+  return [...mapa.values()].sort((a, b) => b.objetivo - a.objetivo);
 }
 
-function barrasFoco(lista, max = 6) {
-  const tope = Math.max(1, ...lista.map(f => f.faltan));
-  return lista.slice(0, max).map(f => `
-    <div class="foco">
-      <span class="foco-nombre">${esc(f.nombre)}</span>
-      <span class="foco-barra"><i style="width:${f.faltan / tope * 100}%"></i></span>
-      <span class="foco-num"><b>${f.faltan}</b> por cubrir</span>
-    </div>`).join('') || '<p class="vacio">Sin unidades por cubrir.</p>';
+// Barra de avance: la pista gris es el objetivo y el relleno, lo cerrado
+function barrasAvance(grupos) {
+  return `<div class="avance-lista">${grupos.map(g => {
+    const pct = g.objetivo ? Math.round(g.cerrados / g.objetivo * 100) : 0;
+    return `
+      <div class="avance-fila" data-tip="${esc(g.nombre)}: ${g.cerrados} de ${g.objetivo} unidades cerradas (${pct}%) · ${plural(g.vacantes, 'vacante', 'vacantes')}">
+        <span class="avance-nombre">${esc(g.nombre)}</span>
+        <span class="avance-pista"><i style="width:${pct}%"></i></span>
+        <span class="avance-valor"><b>${g.cerrados}</b> / ${g.objetivo} · ${pct}%</span>
+      </div>`;
+  }).join('')}</div>`;
 }
 
-function renderResumen(el) {
-  const fecha = datos.resumenFecha;
-  const eventos = datos.historial;
-  const cuenta = tipo => eventos.filter(e => e.tipo === tipo).length;
-  const operativos = eventos.filter(e => e.tipo === 'cambio_estado' && e.estado_nuevo === 'Operativo');
-  const avances = eventos.filter(e => e.tipo === 'cambio_estado' && e.estado_nuevo !== 'Operativo' &&
-    ESTADOS.indexOf(e.estado_nuevo) > ESTADOS.indexOf(e.estado_anterior));
-  const lista = prioridades();
-  const porCiudad = focos('ciudad');
-  const porReclutador = focos('reclutador');
-  const etiquetaDia = fecha === sumarDias(hoy(), -1) ? 'Ayer' : fecha === hoy() ? 'Hoy' : 'El';
-  const fechaLarga = aFecha(fecha).toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' });
+// Escala secuencial de un solo tono (rojo BDB): más oscuro = más cubierto
+const ESCALA_COBERTURA = ['#fbeceb', '#f4c3bd', '#e98c82', '#d2392d', '#9e2a21'];
+const tonoCobertura = pct => ESCALA_COBERTURA[Math.min(4, Math.floor(pct / 25))];
 
-  const frases = [];
-  frases.push(eventos.length
-    ? `${etiquetaDia} ${fechaLarga} hubo <b>${plural(eventos.length, 'movimiento', 'movimientos')}</b>: ${cuenta('asignacion_creada')} proveedores nuevos, ${avances.length} avances de etapa y <b>${operativos.length} cierres a Operativo</b>${cuenta('evaluacion') ? `, además de ${cuenta('evaluacion')} evaluaciones de onboarding` : ''}.`
-    : `${etiquetaDia} ${fechaLarga} no se registraron movimientos en el tablero.`);
-  if (lista[0]) frases.push(`Lo primero que hay que atacar: <b>${esc(lista[0].titulo)}</b> (${esc(lista[0].quien)}): ${esc(lista[0].detalle)}.`);
-  if (porCiudad[0]) {
-    frases.push(`Donde más nos necesitan: ${porCiudad.slice(0, 3).map(f => `<b>${esc(f.nombre)}</b> (${f.faltan} u.)`).join(', ')}.`);
-  }
+function matrizCliente(cliente, lista) {
+  const ciudades = [...new Set(lista.map(v => v.localidad))].sort();
+  const tipos = [...new Set(lista.map(v => v.tipo_vehiculo))].sort();
+  const celda = (ciudad, tipo) => {
+    const vs = lista.filter(v => v.localidad === ciudad && v.tipo_vehiculo === tipo);
+    if (!vs.length) return '<td class="celda-vacia"></td>';
+    const objetivo = sumar(vs, 'cantidad');
+    const cerrados = sumar(vs, v => Math.min(v.cerrados, v.cantidad));
+    const pct = Math.round(cerrados / objetivo * 100);
+    const oscuro = pct >= 75;
+    return `<td class="celda" style="background:${tonoCobertura(pct)};color:${oscuro ? '#fff' : 'var(--texto)'}"
+      data-tip="${esc(cliente)} · ${esc(ciudad)} · ${esc(tipo)}: ${cerrados} de ${objetivo} unidades (${pct}%)">${cerrados}/${objetivo}</td>`;
+  };
+  const cubiertas = ciudades.filter(c => lista.filter(v => v.localidad === c).every(vacanteCubierta)).length;
+  return `
+    <section class="panel matriz-panel">
+      <div class="panel-cab">
+        <h2>${esc(cliente)}</h2>
+        <span class="sub">${cubiertas} de ${plural(ciudades.length, 'ciudad cubierta', 'ciudades cubiertas')}</span>
+      </div>
+      <div class="tabla-scroll">
+        <table class="matriz">
+          <thead><tr><th>Ciudad</th>${tipos.map(t => `<th>${esc(t)}</th>`).join('')}</tr></thead>
+          <tbody>${ciudades.map(c => `<tr><th>${esc(c)}</th>${tipos.map(t => celda(c, t)).join('')}</tr>`).join('')}</tbody>
+        </table>
+      </div>
+    </section>`;
+}
+
+function renderIndicadores(el) {
+  const todas = datos.vacantes;
+  const cubiertas = todas.filter(vacanteCubierta);
+  const objetivo = sumar(todas, 'cantidad');
+  const cerrados = sumar(todas, v => Math.min(v.cerrados, v.cantidad));
+  const ciudades = sumarPor(todas, v => v.localidad);
+  const porEtapa = ESTADOS.map(e => ({ etapa: e, items: datos.asignaciones.filter(a => a.estado === e) }));
+  const maxEtapa = Math.max(1, ...porEtapa.map(e => e.items.length));
+  const clientes = [...new Set(todas.map(v => v.cliente))].sort();
 
   el.innerHTML = `
-    <section class="panel resumen-cab">
-      <div class="panel-cab">
-        <div>
-          <h2>Resumen del día</h2>
-          <p class="sub">Lo que pasó el día anterior y dónde concentrarnos hoy.</p>
-        </div>
-        <label class="filtro"><span>Día a revisar</span><input type="date" id="fecha-resumen" value="${fecha}" max="${hoy()}"></label>
-      </div>
-      <div class="resumen-texto">${frases.map(f => `<p>${f}</p>`).join('')}</div>
-    </section>
     ${kpis([
-      ['Movimientos', eventos.length, fechaLarga],
-      ['Proveedores nuevos', cuenta('asignacion_creada')],
-      ['Avances de etapa', avances.length, '', 'ambar'],
-      ['Cierres a Operativo', operativos.length, '', 'verde'],
-      ['Evaluaciones', cuenta('evaluacion')],
-      ['Prioridades abiertas', lista.length, '', lista.length ? 'rojo' : 'verde'],
+      ['Vacantes activas', todas.length - cubiertas.length, 'en el Tablero'],
+      ['Vacantes cubiertas', cubiertas.length, 'en Onboarding', 'verde'],
+      ['Objetivo', objetivo, 'unidades'],
+      ['Cerrados', cerrados, 'unidades', 'verde'],
+      ['Efectividad', `${objetivo ? Math.round(cerrados / objetivo * 100) : 0}%`],
+      ['Ciudades cubiertas', `${ciudades.filter(c => c.cerrados >= c.objetivo).length} / ${ciudades.length}`],
     ])}
-    <div class="rejilla-resumen">
+    <div class="rejilla-graficas">
       <section class="panel">
-        <div class="panel-cab"><h2>Prioridades para hoy</h2><span class="cuenta">${lista.length}</span></div>
-        <ol class="prioridades">
-          ${lista.slice(0, 12).map(p => `
-            <li class="nivel-${p.nivel} ${p.vacante ? 'clic' : ''}" ${p.vacante ? `data-vacante="${p.vacante}"` : ''}>
-              <span class="nivel">${p.nivel === 3 ? 'Urgente' : p.nivel === 2 ? 'Alta' : 'Seguimiento'}</span>
-              <div><strong>${esc(p.titulo)}</strong><small>${esc(p.detalle)}</small></div>
-              <span class="quien">${esc(p.quien)}</span>
-            </li>`).join('') || '<li class="vacio">Sin prioridades abiertas. ¡Todo cubierto!</li>'}
-        </ol>
-        ${lista.length > 12 ? `<p class="sub pie-panel">Y ${lista.length - 12} más de menor prioridad.</p>` : ''}
+        <div class="panel-cab"><div><h2>Avance por cliente</h2><p class="sub">Unidades cerradas contra el objetivo</p></div></div>
+        ${barrasAvance(sumarPor(todas, v => v.cliente))}
       </section>
-      <div class="columna-resumen">
-        <section class="panel">
-          <div class="panel-cab"><h2>Dónde concentrarnos · por ciudad</h2></div>
-          <div class="focos">${barrasFoco(porCiudad)}</div>
-        </section>
-        <section class="panel">
-          <div class="panel-cab"><h2>Por reclutador</h2></div>
-          <div class="focos">${barrasFoco(porReclutador, 8)}</div>
-        </section>
+      <section class="panel">
+        <div class="panel-cab"><div><h2>Avance por tipo de unidad</h2><p class="sub">Unidades cerradas contra el objetivo</p></div></div>
+        ${barrasAvance(sumarPor(todas, v => v.tipo_vehiculo))}
+      </section>
+      <section class="panel">
+        <div class="panel-cab"><div><h2>Proveedores por etapa de contratación</h2><p class="sub">Cuántos proveedores hay en cada etapa</p></div></div>
+        <div class="avance-lista">${porEtapa.map(e => `
+          <div class="avance-fila" data-tip="${e.etapa}: ${plural(e.items.length, 'proveedor', 'proveedores')}, ${sumar(e.items, 'unidades')} unidades">
+            <span class="avance-nombre">${e.etapa}</span>
+            <span class="avance-pista sin-pista"><i style="width:${e.items.length / maxEtapa * 100}%"></i></span>
+            <span class="avance-valor"><b>${e.items.length}</b> · ${sumar(e.items, 'unidades')} u.</span>
+          </div>`).join('')}</div>
+      </section>
+      <section class="panel">
+        <div class="panel-cab"><div><h2>Avance por reclutador</h2><p class="sub">Unidades cerradas contra el objetivo</p></div></div>
+        ${barrasAvance(sumarPor(todas, nombreReclutador))}
+      </section>
+    </div>
+    <div class="titulo-seccion">
+      <h2>Ciudades cubiertas por cliente y tipo de unidad</h2>
+      <div class="leyenda-escala" aria-label="Escala de cobertura">
+        <span>0%</span>${ESCALA_COBERTURA.map(c => `<i style="background:${c}"></i>`).join('')}<span>100%</span>
+        <small>Cada celda: unidades cerradas / objetivo</small>
       </div>
     </div>
-    <section class="panel">
-      <div class="panel-cab"><h2>Lo que pasó · ${fechaLarga}</h2><span class="cuenta">${eventos.length}</span></div>
-      <ul class="bitacora">
-        ${eventos.map(e => {
-          const [etiqueta, clase] = TIPOS_EVENTO[e.tipo] ?? [e.tipo, ''];
-          return `
-            <li>
-              <span class="hora">${String(e.fecha).slice(11, 16)}</span>
-              <span class="chip ${clase}">${etiqueta}</span>
-              <span class="desc">${esc(e.descripcion)}</span>
-              <span class="quien">${esc(e.usuario ?? '')}</span>
-            </li>`;
-        }).join('') || '<li class="vacio">No hay movimientos registrados ese día.</li>'}
-      </ul>
-    </section>`;
+    <div class="rejilla-matrices">${clientes.map(c => matrizCliente(c, todas.filter(v => v.cliente === c))).join('')}</div>`;
 
-  el.onchange = async e => {
-    if (e.target.id !== 'fecha-resumen' || !e.target.value) return;
-    datos.resumenFecha = e.target.value;
-    datos.historial = await api('GET', `/api/historial?desde=${datos.resumenFecha}`).catch(() => []);
-    render();
-  };
-  el.onclick = e => {
-    const li = e.target.closest('[data-vacante]');
-    if (li) verVacante(Number(li.dataset.vacante));
-  };
+  el.onchange = null;
+  el.onclick = null;
 }
 
-// --- Pipeline de proveedores ---
+// Información al pasar el cursor sobre barras y celdas
+const tooltip = document.createElement('div');
+tooltip.className = 'tooltip';
+document.body.appendChild(tooltip);
+document.addEventListener('mouseover', e => {
+  const t = e.target.closest?.('[data-tip]');
+  if (!t) { tooltip.classList.remove('visible'); return; }
+  tooltip.textContent = t.dataset.tip;
+  tooltip.classList.add('visible');
+});
+document.addEventListener('mousemove', e => {
+  if (!tooltip.classList.contains('visible')) return;
+  const x = Math.min(e.clientX + 14, window.innerWidth - tooltip.offsetWidth - 8);
+  tooltip.style.transform = `translate(${x}px, ${e.clientY + 16}px)`;
+});
+
+// --- Etapas de contratación ---
 
 function formAsignacion(a, { vacanteId, despues } = {}) {
   const vacante = datos.vacantes.find(v => v.id === vacanteId);
@@ -673,7 +636,7 @@ function formAsignacion(a, { vacanteId, despues } = {}) {
     titulo: a ? 'Editar proveedor' : 'Asignar proveedor',
     valores: a ?? {
       vacante_id: vacanteId, reclutador_id: reclutadorActivo() || vacante?.reclutador_id || '',
-      unidades: 1, fecha_disponibilidad: hoy(), estado: 'Prospección',
+      unidades: 1, fecha_disponibilidad: hoy(), estado: 'Contactado',
     },
     campos: [
       { name: 'vacante_id', label: 'Vacante', type: 'select', required: true, ancho: true,
@@ -682,7 +645,7 @@ function formAsignacion(a, { vacanteId, despues } = {}) {
       { name: 'reclutador_id', label: 'Reclutador', type: 'select', required: true, opciones: opciones('reclutadores') },
       { name: 'unidades', label: 'Cantidad de unidades', type: 'number', min: 1, required: true },
       { name: 'fecha_disponibilidad', label: 'Fecha de disponibilidad', type: 'date', required: true },
-      { name: 'estado', label: 'Estado', type: 'select', required: true, opciones: ESTADOS.map(e => ({ value: e, label: e })) },
+      { name: 'estado', label: 'Etapa', type: 'select', required: true, opciones: ESTADOS.map(e => ({ value: e, label: e })) },
       { name: 'notas', label: 'Notas', type: 'textarea' },
     ],
     guardar: d => a ? api('PUT', `/api/asignaciones/${a.id}`, d) : api('POST', '/api/asignaciones', d),
@@ -696,41 +659,55 @@ async function cambiarEstado(id, nuevo) {
   if (!a || a.estado === nuevo) return;
   try {
     await api('PUT', `/api/asignaciones/${id}`, { ...a, estado: nuevo });
-    aviso(nuevo === 'Operativo' ? `${a.proveedor} pasó a Operativo: se sumó a cerrados y entró a onboarding` : `${a.proveedor} → ${nuevo}`);
+    aviso(nuevo === 'Operando' ? `${a.proveedor} pasó a Operando: se sumó a cerrados y entró a onboarding` : `${a.proveedor} → ${nuevo}`);
     await cargar();
   } catch (err) {
     aviso(err.message, true);
   }
 }
 
-// Días desde que se registró el proveedor hasta que pasó a Operativo
-const diasCierre = a => a.estado === 'Operativo' && a.fecha_operativo && a.creado_en ? Math.max(0, diasEntre(a.creado_en.slice(0, 10), a.fecha_operativo)) : null;
-const diasAbierto = a => a.creado_en ? Math.max(0, diasEntre(a.creado_en.slice(0, 10), hoy())) : null;
-const promedio = nums => nums.length ? Math.round(nums.reduce((x, y) => x + y, 0) / nums.length * 10) / 10 : null;
+// Tiempos: cada tramo dice cuándo entró y salió un proveedor de una etapa
+const aMomento = s => new Date(s.length === 10 ? `${s}T00:00:00` : s.replace(' ', 'T'));
+const duracionDias = (desde, hasta) => Math.max(0, ((hasta ? aMomento(hasta) : new Date()) - aMomento(desde)) / 86400000);
+const promedio = nums => nums.length ? nums.reduce((x, y) => x + y, 0) / nums.length : null;
+const fmtDias = d => d == null ? '—' : d < 1 ? `${Math.round(d * 24)} h` : `${(Math.round(d * 10) / 10).toLocaleString('es-MX')} d`;
 
-function tiemposCierre(lista) {
-  const cierres = lista.map(diasCierre).filter(d => d != null);
-  const abiertos = lista.filter(a => a.estado !== 'Operativo').map(diasAbierto).filter(d => d != null);
-  return { cierres, abiertos, promCierre: promedio(cierres), promAbierto: promedio(abiertos) };
+function metricasEtapas(ids) {
+  const tramos = datos.etapas.filter(t => !ids || ids.has(t.asignacion_id));
+  const porEtapa = Object.fromEntries(ESTADOS.map(e => {
+    const deEtapa = tramos.filter(t => t.etapa === e);
+    return [e, {
+      cerrado: promedio(deEtapa.filter(t => t.hasta).map(t => duracionDias(t.desde, t.hasta))),
+      actual: promedio(deEtapa.filter(t => !t.hasta).map(t => duracionDias(t.desde))),
+      tramos: deEtapa.filter(t => t.hasta).length,
+    }];
+  }));
+  // Ciclo: del primer tramo registrado a la entrada a Operando (solo si pasó por otra etapa)
+  const ciclos = [];
+  for (const id of new Set(tramos.map(t => t.asignacion_id))) {
+    const suyos = tramos.filter(t => t.asignacion_id === id);
+    const operando = suyos.find(t => t.etapa === 'Operando');
+    if (operando && suyos[0] !== operando) ciclos.push(duracionDias(suyos[0].desde, operando.desde));
+  }
+  return { porEtapa, ciclo: promedio(ciclos), ciclos: ciclos.length };
 }
 
+const diasEnEtapa = a => a.etapa_desde ? duracionDias(a.etapa_desde) : null;
+
 function tarjeta(a) {
-  const cierre = diasCierre(a);
-  const abierto = diasAbierto(a);
-  const dias = a.estado === 'Operativo'
-    ? (cierre != null ? `<span class="dias ok" title="Días desde que se registró hasta Operativo">Cerró en ${plural(cierre, 'día', 'días')}</span>` : '')
-    : (abierto != null ? `<span class="dias ${abierto >= 14 ? 'alerta' : abierto >= 7 ? 'aviso' : ''}" title="Días desde que se registró">Día ${abierto}</span>` : '');
+  const enEtapa = diasEnEtapa(a);
+  const clase = a.estado === 'Operando' ? 'ok' : enEtapa >= 7 ? 'alerta' : enEtapa >= 3 ? 'aviso' : '';
   return `
     <article class="tarjeta" draggable="true" data-id="${a.id}">
-      <div class="tarjeta-cab"><strong>${esc(a.proveedor)}</strong>${dias}</div>
+      <div class="tarjeta-cab"><strong>${esc(a.proveedor)}</strong>
+        ${enEtapa != null ? `<span class="dias ${clase}" title="Tiempo en la etapa actual">${fmtDias(enEtapa)}</span>` : ''}</div>
       <span class="meta">${esc(a.cliente)} · ${esc(a.localidad)}</span>
       <span class="meta">${esc(a.tipo_vehiculo)}</span>
       <div class="pie">
         <span class="pastilla">${a.unidades} u.</span>
-        <span class="meta">Disp. ${fmtCorto(a.fecha_disponibilidad)}</span>
         <span class="reclutador-tarjeta"><span class="avatar">${esc(iniciales(a.reclutador))}</span>${esc(a.reclutador)}</span>
       </div>
-      <select class="mover" data-id="${a.id}" aria-label="Cambiar estado de ${esc(a.proveedor)}">
+      <select class="mover" data-id="${a.id}" aria-label="Cambiar etapa de ${esc(a.proveedor)}">
         ${ESTADOS.map(e => `<option ${e === a.estado ? 'selected' : ''}>${e}</option>`).join('')}
       </select>
     </article>`;
@@ -750,25 +727,37 @@ function columnasKanban(lista, compacto = false) {
     </div>`;
 }
 
-function franjaCierre(lista) {
-  const t = tiemposCierre(lista);
-  const masAntiguo = lista.filter(a => a.estado !== 'Operativo').sort((x, y) => (diasAbierto(y) ?? 0) - (diasAbierto(x) ?? 0))[0];
-  const porReclutador = gruposPorReclutador(lista).map(g => ({ nombre: g.nombre, ...tiemposCierre(g.items) }));
+// Las cuatro etapas, siempre visibles, con cuántos hay y cuánto tardan
+function pasosEtapas(lista) {
+  const m = metricasEtapas(new Set(lista.map(a => a.id)));
+  const masLento = lista.filter(a => a.estado !== 'Operando').sort((x, y) => (diasEnEtapa(y) ?? 0) - (diasEnEtapa(x) ?? 0))[0];
   return `
-    <section class="panel franja-cierre">
-      <div class="cierre-principal">
-        <span>Promedio de cierre</span>
-        <strong>${t.promCierre != null ? `${t.promCierre} días` : '—'}</strong>
-        <small>${t.cierres.length ? `de registro a Operativo · ${plural(t.cierres.length, 'cierre', 'cierres')}` : 'Aún no hay cierres registrados'}</small>
-      </div>
-      <div class="cierre-dato"><span>En proceso</span><strong>${t.abiertos.length}</strong><small>${t.promAbierto != null ? `llevan ${t.promAbierto} días en promedio` : 'sin proveedores abiertos'}</small></div>
-      <div class="cierre-dato"><span>Más antiguo abierto</span><strong>${masAntiguo ? `${diasAbierto(masAntiguo) ?? 0} d` : '—'}</strong><small>${masAntiguo ? esc(masAntiguo.proveedor) : ''}</small></div>
-      <div class="cierre-reclutadores">
-        ${porReclutador.map(r => `
-          <span class="cierre-chip" title="${esc(r.nombre)}: ${r.cierres.length} cierres, ${r.abiertos.length} en proceso">
-            <b>${esc(r.nombre)}</b> ${r.promCierre != null ? `${r.promCierre} d` : '—'}
-            <small>${r.cierres.length} cierres · ${r.abiertos.length} abiertos</small>
-          </span>`).join('') || '<small class="tenue">Cuando los reclutadores registren proveedores verás aquí sus días de cierre.</small>'}
+    <section class="panel etapas-panel">
+      <ol class="pasos">
+        ${ESTADOS.map((e, i) => {
+          const items = lista.filter(a => a.estado === e);
+          const t = m.porEtapa[e];
+          const tiempo = e === 'Operando'
+            ? 'Etapa final'
+            : t.cerrado != null ? `Tarda ${fmtDias(t.cerrado)} en promedio` : t.actual != null ? `Llevan ${fmtDias(t.actual)} en promedio` : 'Sin datos aún';
+          return `
+            <li class="paso ${CLASE_ESTADO[e]}">
+              <span class="paso-num">${i + 1}</span>
+              <div class="paso-texto">
+                <span class="paso-nombre">${e}</span>
+                <strong>${items.length}</strong>
+                <small>${sumar(items, 'unidades')} unidades</small>
+                <small class="paso-tiempo">${tiempo}</small>
+              </div>
+            </li>`;
+        }).join('')}
+      </ol>
+      <div class="ciclo">
+        <div><span>Tiempo promedio hasta Operando</span><strong>${fmtDias(m.ciclo)}</strong>
+          <small>${m.ciclos ? `de Contactado a Operando · ${plural(m.ciclos, 'proveedor', 'proveedores')}` : 'Se mide desde que se registra el proveedor hasta que pasa a Operando'}</small></div>
+        <div><span>En proceso</span><strong>${lista.filter(a => a.estado !== 'Operando').length}</strong><small>proveedores aún no operan</small></div>
+        <div><span>Más tiempo en su etapa</span><strong>${masLento ? fmtDias(diasEnEtapa(masLento)) : '—'}</strong>
+          <small>${masLento ? `${esc(masLento.proveedor)} · ${masLento.estado}` : ''}</small></div>
       </div>
     </section>`;
 }
@@ -779,12 +768,11 @@ function renderPipeline(el) {
   const porReclutador = datos.vistaPipeline === 'reclutador';
 
   el.innerHTML = `
-    ${franjaCierre(lista)}
     <section class="panel">
       <div class="panel-cab">
         <div>
-          <h2>Pipeline de proveedores</h2>
-          <p class="sub">Arrastra una tarjeta a otra columna o usa el selector. Al pasar a Operativo, sus unidades se suman a los cerrados de la vacante.</p>
+          <h2>Etapas de contratación</h2>
+          <p class="sub">Contactado → Seguimiento documentos → Firma de contrato → Operando. Arrastra una tarjeta o usa el selector para cambiar de etapa; el tiempo se mide en cada cambio.</p>
         </div>
         <div class="acciones">
           ${selectFiltro('reclutador', 'Reclutador', 'reclutadores')}
@@ -797,9 +785,10 @@ function renderPipeline(el) {
         </div>
       </div>
     </section>
+    ${pasosEtapas(lista)}
     ${porReclutador
       ? gruposPorReclutador(lista).map(g => {
-        const t = tiemposCierre(g.items);
+        const m = metricasEtapas(new Set(g.items.map(a => a.id)));
         return `
           <section class="panel carril">
             <div class="carril-cab">
@@ -809,14 +798,13 @@ function renderPipeline(el) {
                 <small>${ciudadesDe(g.id).join(' · ') || 'Sin ciudades asignadas'}</small>
               </div>
               <div class="carril-stats">
-                <span><b>${t.abiertos.length}</b> en proceso</span>
-                <span><b>${g.items.filter(a => a.estado === 'Operativo').length}</b> operativos</span>
-                <span class="destacado">Cierre prom. <b>${t.promCierre != null ? `${t.promCierre} d` : '—'}</b></span>
+                ${ESTADOS.map(e => `<span>${e}: <b>${g.items.filter(a => a.estado === e).length}</b></span>`).join('')}
+                <span class="destacado">Hasta Operando <b>${fmtDias(m.ciclo)}</b></span>
               </div>
             </div>
             ${columnasKanban(g.items, true)}
           </section>`;
-      }).join('') || '<section class="panel"><p class="vacio">Aún no hay proveedores en el pipeline. Usa «+ Asignar proveedor» o ábrelos desde una vacante del Tablero.</p></section>'
+      }).join('') || '<section class="panel"><p class="vacio">Aún no hay proveedores. Usa «+ Asignar proveedor» o ábrelos desde una vacante del Tablero.</p></section>'
       : columnasKanban(lista)}`;
 
   const limpiar = () => $$('.columna.sobre').forEach(c => c.classList.remove('sobre'));
@@ -911,13 +899,33 @@ function kpisOnboarding() {
 function renderOnboarding(el) {
   const { reclutador } = datos.filtros;
   const lista = datos.onboarding.filter(o => !reclutador || String(o.reclutador_id) === reclutador);
+  const cubiertas = datos.vacantes.filter(vacanteCubierta);
   el.innerHTML = `
     <div id="kpis-onboarding">${kpisOnboarding()}</div>
     <section class="panel">
       <div class="panel-cab">
         <div>
+          <h2>Vacantes cubiertas <span class="cuenta">${cubiertas.length}</span></h2>
+          <p class="sub">Al completar su objetivo, la vacante sale del Tablero y sus proveedores siguen aquí sus dos primeras semanas.</p>
+        </div>
+      </div>
+      <div class="cubiertas">
+        ${cubiertas.map(v => {
+          const operando = datos.asignaciones.filter(a => a.vacante_id === v.id && a.estado === 'Operando');
+          return `
+            <article class="cubierta" data-vacante="${v.id}">
+              <div class="cubierta-cab"><strong>${esc(v.cliente)} · ${esc(v.localidad)}</strong><span class="chip ok">${v.cerrados}/${v.cantidad}</span></div>
+              <span class="meta">${esc(v.tipo_vehiculo)} · ${esc(nombreReclutador(v))} · inicio ${inicioTexto(v)}</span>
+              <div class="cubierta-prov">${operando.map(a => `<span class="ciudad">${esc(a.proveedor)} · ${a.unidades} u.</span>`).join('') || '<span class="tenue">Sin proveedores registrados</span>'}</div>
+            </article>`;
+        }).join('') || '<p class="vacio">Aún no hay vacantes cubiertas.</p>'}
+      </div>
+    </section>
+    <section class="panel">
+      <div class="panel-cab">
+        <div>
           <h2>Onboarding · primeras dos semanas</h2>
-          <p class="sub">Proveedores en estado Operativo. Los cambios se guardan automáticamente.</p>
+          <p class="sub">Proveedores en Operando. Los cambios se guardan automáticamente.</p>
         </div>
         <div class="acciones">${selectFiltro('reclutador', 'Reclutador', 'reclutadores')}</div>
       </div>
@@ -936,13 +944,16 @@ function renderOnboarding(el) {
                 </td>
                 <td>${celdaSemana(o, 1)}</td>
                 <td>${celdaSemana(o, 2)}</td>
-              </tr>`).join('') || '<tr><td colspan="3" class="vacio">Ningún proveedor ha llegado a Operativo todavía.</td></tr>'}
+              </tr>`).join('') || '<tr><td colspan="3" class="vacio">Ningún proveedor ha llegado a Operando todavía.</td></tr>'}
           </tbody>
         </table>
       </div>
     </section>`;
 
-  el.onclick = null;
+  el.onclick = e => {
+    const c = e.target.closest('[data-vacante]');
+    if (c) verVacante(Number(c.dataset.vacante));
+  };
   el.onchange = async e => {
     if (e.target.dataset.filtro) { datos.filtros.reclutador = e.target.value; return render(); }
     const fila = e.target.closest('tr[data-id]');
@@ -1255,7 +1266,6 @@ $('#usuario-actual').addEventListener('click', async e => {
   }
 });
 
-datos.resumenFecha = sumarDias(hoy(), -1);
 datos.agruparTablero = almacen.get('agruparTablero') !== '0';
 datos.vistaPipeline = almacen.get('vistaPipeline') === 'junto' ? 'junto' : 'reclutador';
 const vistaGuardada = almacen.get('vista');
