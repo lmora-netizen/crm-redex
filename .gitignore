@@ -32,3 +32,6 @@ desktop.ini
 
 # Llave de la cuenta de servicio de Google (nunca se sube)
 credenciales/
+
+# Datos reales para la migración a Apps Script (nunca se suben)
+apps-script/Migracion.js
