@@ -36,6 +36,7 @@ const datos = {
   vista: 'indicadores',
   etapas: [],
   prospectos: [],
+  sincronizacion: null,
   agruparTablero: true,
   vistaPipeline: 'reclutador',
   cat: { clientes: [], localidades: [], 'tipos-vehiculo': [], reclutadores: [] },
@@ -95,14 +96,14 @@ function aviso(mensaje, error = false) {
 const esAdmin = () => datos.usuario?.rol === 'admin';
 
 async function cargar() {
-  const [clientes, localidades, tipos, reclutadores, vacantes, asignaciones, onboarding, usuarios, etapas, prospectos] = await Promise.all([
+  const [clientes, localidades, tipos, reclutadores, vacantes, asignaciones, onboarding, usuarios, etapas, prospectos, sincronizacion] = await Promise.all([
     api('GET', '/api/clientes'), api('GET', '/api/localidades'), api('GET', '/api/tipos-vehiculo'),
     api('GET', '/api/reclutadores'), api('GET', '/api/vacantes'), api('GET', '/api/asignaciones'),
     api('GET', '/api/onboarding'), esAdmin() ? api('GET', '/api/usuarios') : [],
-    api('GET', '/api/etapas'), api('GET', '/api/prospectos'),
+    api('GET', '/api/etapas'), api('GET', '/api/prospectos'), api('GET', '/api/sincronizacion'),
   ]);
   Object.assign(datos.cat, { clientes, localidades, 'tipos-vehiculo': tipos, reclutadores });
-  Object.assign(datos, { vacantes, asignaciones, onboarding, usuarios, etapas, prospectos });
+  Object.assign(datos, { vacantes, asignaciones, onboarding, usuarios, etapas, prospectos, sincronizacion });
   render();
 }
 
@@ -304,7 +305,7 @@ function renderTablero(el) {
     <section class="panel">
       <div class="panel-cab">
         <div>
-          <h2>Capacidad por reclutador y ciudad</h2>
+          <h2>Capacidad por reclutador y ciudad ${estadoSincronizacion()}</h2>
           <p class="sub">Vacantes por cubrir. Haz clic en una para ver su detalle y sus proveedores.
             ${datos.vacantes.some(vacanteCubierta) ? `<button class="enlace" data-ir="onboarding">${plural(datos.vacantes.filter(vacanteCubierta).length, 'vacante cubierta pasó', 'vacantes cubiertas pasaron')} a Onboarding →</button>` : ''}</p>
         </div>
@@ -365,6 +366,7 @@ function renderTablero(el) {
     const b = e.target.closest('[data-accion]');
     if (!b) return;
     const v = datos.vacantes.find(x => x.id === Number(b.dataset.id));
+    if (b.dataset.accion === 'sincronizar') return sincronizarAhora();
     if (b.dataset.accion === 'nueva-vacante') formVacante();
     if (b.dataset.accion === 'ver-vacante') verVacante(v.id);
     if (b.dataset.accion === 'editar-vacante') formVacante(v);
@@ -374,6 +376,36 @@ function renderTablero(el) {
         'Vacante eliminada');
     }
   };
+}
+
+function estadoSincronizacion() {
+  const s = datos.sincronizacion;
+  if (!s) return '';
+  if (!s.configurada) return `<span class="sinc"><span class="chip">Google Sheets sin conectar</span></span>`;
+  const hace = fechaHora => {
+    const min = Math.max(0, Math.round((Date.now() - new Date(fechaHora.replace(' ', 'T'))) / 60000));
+    return min < 1 ? 'hace un momento' : min < 60 ? `hace ${min} min` : `hace ${Math.round(min / 60)} h`;
+  };
+  const error = s.ultima?.estado === 'error';
+  return `<span class="sinc">
+      <span class="chip ${error ? 'alerta' : 'ok'}" title="${esc(error ? s.ultima.detalle : `Se revisa cada ${s.minutos} min`)}">
+        ${error ? 'Error al sincronizar con Google Sheets' : `Google Sheets · sincronizado ${s.ultimaCorrecta ? hace(s.ultimaCorrecta) : 'pendiente'}`}
+      </span>
+      ${esAdmin() ? '<button class="enlace" data-accion="sincronizar">Sincronizar ahora</button>' : ''}
+    </span>`;
+}
+
+async function sincronizarAhora() {
+  aviso('Sincronizando con Google Sheets…');
+  try {
+    const r = await api('POST', '/api/sincronizacion');
+    await cargar();
+    aviso(r.estado === 'ok' ? `Sincronizado: ${r.resumen.total} registros actualizados` : 'Sin cambios en la hoja');
+  } catch (err) {
+    datos.sincronizacion = await api('GET', '/api/sincronizacion').catch(() => datos.sincronizacion);
+    render();
+    aviso(err.message, true);
+  }
 }
 
 async function importarArchivo(archivo) {

@@ -377,3 +377,5 @@ a.btn { text-decoration: none; color: inherit; display: inline-block; }
 label.btn { display: inline-block; }
 .avisos { margin: 0; padding-left: 18px; max-height: 220px; overflow: auto; }
 .avisos li { margin-bottom: 4px; }
+.sinc { display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; font-size: 11px; font-weight: 400; vertical-align: middle; }
+.sinc .chip { margin: 0; }
