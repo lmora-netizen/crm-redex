@@ -29,3 +29,6 @@ desktop.ini
 
 # Plantillas de Excel generadas
 *.xlsx
+
+# Llave de la cuenta de servicio de Google (nunca se sube)
+credenciales/

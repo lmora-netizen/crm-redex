@@ -5,6 +5,7 @@ const express = require('express');
 const { abrir, estaVacia, sembrar, dia, ESTADOS } = require('./db');
 const { crearAuth, HttpError } = require('./auth');
 const { crearPlantilla, importarExcel } = require('./excel');
+const { crearSincronizacion } = require('./sincronizacion');
 
 const db = abrir();
 if (estaVacia(db)) {
@@ -340,6 +341,19 @@ app.post('/api/importar-excel', express.raw({ type: () => true, limit: '10mb' })
   res.json(resumen);
 });
 
+// --- Sincronización automática con la hoja de Google ---
+
+const sincronizacion = crearSincronizacion(db, { registrar, cambiarTramo, asegurarOnboarding, ajustarCerrados });
+
+app.get('/api/sincronizacion', (req, res) => res.json(sincronizacion.estado()));
+
+app.post('/api/sincronizacion', async (req, res) => {
+  if (req.usuario.rol !== 'admin') throw new HttpError(403, 'Solo un administrador puede sincronizar');
+  const r = await sincronizacion.sincronizar({ forzar: true });
+  if (r.estado === 'sin_configurar' || r.estado === 'error') throw new HttpError(400, r.motivo);
+  res.json({ ...r, ...sincronizacion.estado() });
+});
+
 // --- Prospectos sin vacante ---
 
 const SELECT_PROSPECTOS = `SELECT p.*, r.nombre AS reclutador FROM prospectos p LEFT JOIN reclutadores r ON r.id = p.reclutador_id`;
@@ -452,4 +466,5 @@ const PUERTO = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || '127.0.0.1';
 app.listen(PUERTO, HOST, () => {
   console.log(`CRM Redex listo en http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PUERTO}`);
+  if (process.env.SIN_SINCRONIZACION !== '1') sincronizacion.iniciar();
 });
