@@ -35,6 +35,7 @@ const datos = {
   usuarios: [],
   vista: 'indicadores',
   etapas: [],
+  prospectos: [],
   agruparTablero: true,
   vistaPipeline: 'reclutador',
   cat: { clientes: [], localidades: [], 'tipos-vehiculo': [], reclutadores: [] },
@@ -94,14 +95,14 @@ function aviso(mensaje, error = false) {
 const esAdmin = () => datos.usuario?.rol === 'admin';
 
 async function cargar() {
-  const [clientes, localidades, tipos, reclutadores, vacantes, asignaciones, onboarding, usuarios, etapas] = await Promise.all([
+  const [clientes, localidades, tipos, reclutadores, vacantes, asignaciones, onboarding, usuarios, etapas, prospectos] = await Promise.all([
     api('GET', '/api/clientes'), api('GET', '/api/localidades'), api('GET', '/api/tipos-vehiculo'),
     api('GET', '/api/reclutadores'), api('GET', '/api/vacantes'), api('GET', '/api/asignaciones'),
     api('GET', '/api/onboarding'), esAdmin() ? api('GET', '/api/usuarios') : [],
-    api('GET', '/api/etapas'),
+    api('GET', '/api/etapas'), api('GET', '/api/prospectos'),
   ]);
   Object.assign(datos.cat, { clientes, localidades, 'tipos-vehiculo': tipos, reclutadores });
-  Object.assign(datos, { vacantes, asignaciones, onboarding, usuarios, etapas });
+  Object.assign(datos, { vacantes, asignaciones, onboarding, usuarios, etapas, prospectos });
   render();
 }
 
@@ -630,13 +631,15 @@ document.addEventListener('mousemove', e => {
 
 // --- Etapas de contratación ---
 
-function formAsignacion(a, { vacanteId, despues } = {}) {
+function formAsignacion(a, { vacanteId, despues, prospecto } = {}) {
   const vacante = datos.vacantes.find(v => v.id === vacanteId);
   abrirFormulario({
-    titulo: a ? 'Editar proveedor' : 'Asignar proveedor',
+    titulo: a ? 'Editar proveedor' : prospecto ? `Asignar a vacante · ${prospecto.proveedor}` : 'Asignar proveedor',
     valores: a ?? {
-      vacante_id: vacanteId, reclutador_id: reclutadorActivo() || vacante?.reclutador_id || '',
-      unidades: 1, fecha_disponibilidad: hoy(), estado: 'Contactado',
+      vacante_id: vacanteId, reclutador_id: prospecto?.reclutador_id || reclutadorActivo() || vacante?.reclutador_id || '',
+      unidades: prospecto?.unidades ?? 1, fecha_disponibilidad: hoy(), estado: 'Contactado',
+      proveedor: prospecto?.proveedor ?? '',
+      notas: prospecto ? [prospecto.referencia && `Reportado para ${prospecto.referencia}`, prospecto.notas].filter(Boolean).join('. ') : '',
     },
     campos: [
       { name: 'vacante_id', label: 'Vacante', type: 'select', required: true, ancho: true,
@@ -648,10 +651,62 @@ function formAsignacion(a, { vacanteId, despues } = {}) {
       { name: 'estado', label: 'Etapa', type: 'select', required: true, opciones: ESTADOS.map(e => ({ value: e, label: e })) },
       { name: 'notas', label: 'Notas', type: 'textarea' },
     ],
-    guardar: d => a ? api('PUT', `/api/asignaciones/${a.id}`, d) : api('POST', '/api/asignaciones', d),
+    guardar: async d => {
+      if (a) return api('PUT', `/api/asignaciones/${a.id}`, d);
+      const nuevo = await api('POST', '/api/asignaciones', d);
+      if (prospecto) await api('DELETE', `/api/prospectos/${prospecto.id}`);
+      return nuevo;
+    },
     exito: a ? 'Proveedor actualizado' : 'Proveedor asignado',
     despues,
   });
+}
+
+function formProspecto(p) {
+  abrirFormulario({
+    titulo: p ? `Editar prospecto · ${p.proveedor}` : 'Prospecto sin vacante',
+    valores: p ?? { unidades: 1, reclutador_id: reclutadorActivo() },
+    campos: [
+      { name: 'proveedor', label: 'Proveedor', required: true },
+      { name: 'unidades', label: 'Unidades', type: 'number', min: 1 },
+      { name: 'referencia', label: 'Vacante reportada', placeholder: 'ej. SMT2' },
+      { name: 'tipo_vehiculo', label: 'Tipo de vehículo' },
+      { name: 'reclutador_id', label: 'Reclutador', type: 'select', opciones: opciones('reclutadores') },
+      { name: 'notas', label: 'Notas', type: 'textarea' },
+    ],
+    guardar: d => p ? api('PUT', `/api/prospectos/${p.id}`, d) : api('POST', '/api/prospectos', d),
+    exito: p ? 'Prospecto actualizado' : 'Prospecto registrado',
+  });
+}
+
+// Apartado bajo las instrucciones: proveedores reportados sin vacante en el tablero
+function apartadoProspectos() {
+  const lista = datos.prospectos;
+  return `
+    <div class="prospectos">
+      <div class="prospectos-cab">
+        <h3>Prospectos sin vacante <span class="cuenta">${lista.length}</span></h3>
+        <button class="btn sm" data-accion="nuevo-prospecto">+ Prospecto sin vacante</button>
+      </div>
+      ${lista.length ? `
+        <table class="tabla compacta">
+          <thead><tr><th>Proveedor</th><th class="num">Unidades</th><th>Vacante reportada</th><th>Vehículo</th><th>Reclutador</th><th>Notas</th><th></th></tr></thead>
+          <tbody>${lista.map(p => `
+            <tr>
+              <td><strong>${esc(p.proveedor)}</strong></td>
+              <td class="num">${p.unidades}</td>
+              <td>${esc(p.referencia ?? '') || '<span class="tenue">—</span>'}</td>
+              <td>${esc(p.tipo_vehiculo ?? '') || '<span class="tenue">—</span>'}</td>
+              <td>${esc(p.reclutador ?? '') || '<span class="tenue">—</span>'}</td>
+              <td>${esc(p.notas ?? '')}</td>
+              <td class="acciones-fila">
+                <button class="btn sm primario" data-accion="asignar-prospecto" data-id="${p.id}">Asignar a vacante</button>
+                <button class="icono" data-accion="editar-prospecto" data-id="${p.id}" title="Editar">${ICONO.editar}</button>
+                <button class="icono peligro" data-accion="borrar-prospecto" data-id="${p.id}" title="Eliminar">${ICONO.borrar}</button>
+              </td>
+            </tr>`).join('')}</tbody>
+        </table>` : '<p class="sub">Aquí quedan los proveedores reportados para una vacante que todavía no está en el tablero.</p>'}
+    </div>`;
 }
 
 async function cambiarEstado(id, nuevo) {
@@ -784,6 +839,7 @@ function renderPipeline(el) {
           <button class="btn primario" data-accion="nuevo">+ Asignar proveedor</button>
         </div>
       </div>
+      ${apartadoProspectos()}
     </section>
     ${pasosEtapas(lista)}
     ${porReclutador
@@ -795,7 +851,7 @@ function renderPipeline(el) {
               <span class="avatar grande">${esc(iniciales(g.nombre))}</span>
               <div>
                 <h2>${esc(g.nombre)}</h2>
-                <small>${ciudadesDe(g.id).join(' · ') || 'Sin ciudades asignadas'}</small>
+                <small>${[...new Set([...ciudadesDe(g.id), ...g.items.map(a => a.localidad)])].sort().join(' · ') || 'Sin ciudades asignadas'}</small>
               </div>
               <div class="carril-stats">
                 ${ESTADOS.map(e => `<span>${e}: <b>${g.items.filter(a => a.estado === e).length}</b></span>`).join('')}
@@ -820,6 +876,14 @@ function renderPipeline(el) {
       return render();
     }
     if (e.target.closest('[data-accion="nuevo"]')) return formAsignacion();
+    const bp = e.target.closest('[data-accion$="prospecto"]');
+    if (bp) {
+      const p = datos.prospectos.find(x => x.id === Number(bp.dataset.id));
+      if (bp.dataset.accion === 'nuevo-prospecto') return formProspecto();
+      if (bp.dataset.accion === 'editar-prospecto') return formProspecto(p);
+      if (bp.dataset.accion === 'asignar-prospecto') return formAsignacion(null, { prospecto: p });
+      if (bp.dataset.accion === 'borrar-prospecto') return eliminar(`/api/prospectos/${p.id}`, `¿Eliminar el prospecto ${p.proveedor}?`, 'Prospecto eliminado');
+    }
     const t = e.target.closest('.tarjeta');
     if (t && !e.target.closest('.mover')) formAsignacion(datos.asignaciones.find(a => a.id === Number(t.dataset.id)));
   };

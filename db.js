@@ -89,6 +89,19 @@ CREATE TABLE IF NOT EXISTS etapas_asignacion (
 );
 CREATE INDEX IF NOT EXISTS etapas_asignacion_id ON etapas_asignacion (asignacion_id);
 
+-- Proveedores reportados para una vacante que aún no existe en el tablero;
+-- al asignarlos a una vacante pasan a las etapas de contratación
+CREATE TABLE IF NOT EXISTS prospectos (
+  id INTEGER PRIMARY KEY,
+  proveedor TEXT NOT NULL,
+  unidades INTEGER NOT NULL DEFAULT 1 CHECK (unidades > 0),
+  referencia TEXT,          -- cliente o ciudad tal como se reportó (ej. SMT2)
+  tipo_vehiculo TEXT,
+  reclutador_id INTEGER REFERENCES reclutadores(id),
+  notas TEXT,
+  creado_en TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
 -- Bitácora de movimientos para el resumen diario. Sin llaves foráneas:
 -- conserva el registro aunque se borre la vacante o el proveedor.
 CREATE TABLE IF NOT EXISTS historial (

@@ -367,3 +367,9 @@ dialog:has(.formulario.amplio) { width: min(820px, calc(100vw - 32px)); }
   .formulario.amplio .campos { grid-template-columns: 1fr; }
   .rejilla-cat { grid-template-columns: 1fr; }
 }
+
+/* --- Prospectos sin vacante (bajo las instrucciones de Etapas) --- */
+.prospectos { border-top: 1px solid var(--borde); padding: 12px 16px 14px; }
+.prospectos-cab { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 8px; }
+.prospectos-cab h3 { font-size: 13px; }
+.prospectos .sub { margin: 0; }

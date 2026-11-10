@@ -320,6 +320,49 @@ app.delete('/api/asignaciones/:id', (req, res) => {
   res.status(204).end();
 });
 
+// --- Prospectos sin vacante ---
+
+const SELECT_PROSPECTOS = `SELECT p.*, r.nombre AS reclutador FROM prospectos p LEFT JOIN reclutadores r ON r.id = p.reclutador_id`;
+
+const leerProspecto = b => ({
+  proveedor: texto(b.proveedor, 'Proveedor', true),
+  unidades: entero(b.unidades, 'Unidades', { min: 1 }) ?? 1,
+  referencia: texto(b.referencia, 'Vacante reportada'),
+  tipo_vehiculo: texto(b.tipo_vehiculo, 'Tipo de vehículo'),
+  reclutador_id: entero(b.reclutador_id, 'Reclutador', { min: 1 }),
+  notas: texto(b.notas, 'Notas'),
+});
+
+app.get('/api/prospectos', (req, res) => {
+  res.json(db.prepare(`${SELECT_PROSPECTOS} ORDER BY p.creado_en DESC, p.id DESC`).all());
+});
+
+app.post('/api/prospectos', (req, res) => {
+  const r = db.prepare(`
+    INSERT INTO prospectos (proveedor, unidades, referencia, tipo_vehiculo, reclutador_id, notas)
+    VALUES (:proveedor, :unidades, :referencia, :tipo_vehiculo, :reclutador_id, :notas)`).run(leerProspecto(req.body));
+  const p = db.prepare(`${SELECT_PROSPECTOS} WHERE p.id = ?`).get(r.lastInsertRowid);
+  registrar(req, 'prospecto_creado', { reclutador_id: p.reclutador_id },
+    `Prospecto sin vacante: ${p.proveedor} (${p.unidades} u.)${p.referencia ? ` para ${p.referencia}` : ''}`);
+  res.status(201).json(p);
+});
+
+app.put('/api/prospectos/:id', (req, res) => {
+  const id = idParam(req);
+  const r = db.prepare(`
+    UPDATE prospectos SET proveedor = :proveedor, unidades = :unidades, referencia = :referencia,
+      tipo_vehiculo = :tipo_vehiculo, reclutador_id = :reclutador_id, notas = :notas
+    WHERE id = :id`).run({ ...leerProspecto(req.body), id });
+  if (!r.changes) throw new HttpError(404, 'Prospecto no encontrado');
+  res.json(db.prepare(`${SELECT_PROSPECTOS} WHERE p.id = ?`).get(id));
+});
+
+app.delete('/api/prospectos/:id', (req, res) => {
+  const r = db.prepare('DELETE FROM prospectos WHERE id = ?').run(idParam(req));
+  if (!r.changes) throw new HttpError(404, 'Prospecto no encontrado');
+  res.status(204).end();
+});
+
 // --- Onboarding ---
 
 const SELECT_ONBOARDING = `
