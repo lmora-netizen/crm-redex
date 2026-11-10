@@ -1,0 +1,4 @@
+pruebas/**
+**/*.md
+exportar-datos.js
+node_modules/**
