@@ -205,7 +205,12 @@ async function main() {
   console.log(`Clientes: ${clientes.size} · Localidades: ${localidades.size} · Tipos de vehículo: ${tipos.size}`);
 }
 
-main().catch(err => {
-  console.error(`Error: ${err.message}`);
-  process.exit(1);
-});
+// Los formatos de la hoja también los usa la importación de Excel
+module.exports = { limpio, dinero, entero, fecha, avance, tipoVehiculo, capitalizar };
+
+if (require.main === module) {
+  main().catch(err => {
+    console.error(`Error: ${err.message}`);
+    process.exit(1);
+  });
+}

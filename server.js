@@ -4,6 +4,7 @@ const path = require('node:path');
 const express = require('express');
 const { abrir, estaVacia, sembrar, dia, ESTADOS } = require('./db');
 const { crearAuth, HttpError } = require('./auth');
+const { crearPlantilla, importarExcel } = require('./excel');
 
 const db = abrir();
 if (estaVacia(db)) {
@@ -253,9 +254,10 @@ app.get('/api/etapas', (req, res) => {
 });
 
 // Cierra el tramo de la etapa actual y abre el de la nueva
-function cambiarTramo(id, etapa) {
-  db.prepare("UPDATE etapas_asignacion SET hasta = datetime('now', 'localtime') WHERE asignacion_id = ? AND hasta IS NULL").run(id);
-  db.prepare("INSERT INTO etapas_asignacion (asignacion_id, etapa, desde) VALUES (?, ?, datetime('now', 'localtime'))").run(id, etapa);
+// `momento` permite registrar una fecha pasada (por ejemplo, la que trae un Excel)
+function cambiarTramo(id, etapa, momento = null) {
+  db.prepare("UPDATE etapas_asignacion SET hasta = COALESCE(?, datetime('now', 'localtime')) WHERE asignacion_id = ? AND hasta IS NULL").run(momento, id);
+  db.prepare("INSERT INTO etapas_asignacion (asignacion_id, etapa, desde) VALUES (?, ?, COALESCE(?, datetime('now', 'localtime')))").run(id, etapa, momento);
 }
 
 // Los cerrados de la vacante suman las unidades de sus proveedores en Operando
@@ -318,6 +320,24 @@ app.delete('/api/asignaciones/:id', (req, res) => {
   registrar(req, 'asignacion_eliminada', { vacante_id: a.vacante_id, asignacion_id: id, reclutador_id: a.reclutador_id },
     `Se quitó al proveedor ${a.proveedor} de ${a.cliente} · ${a.localidad}`);
   res.status(204).end();
+});
+
+// --- Plantilla de Excel e importación ---
+
+app.get('/api/plantilla', async (req, res) => {
+  const archivo = await crearPlantilla(db);
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="Plantilla CRM Redex ${dia()}.xlsx"`);
+  res.send(Buffer.from(archivo));
+});
+
+app.post('/api/importar-excel', express.raw({ type: () => true, limit: '10mb' }), async (req, res) => {
+  if (req.usuario.rol !== 'admin') throw new HttpError(403, 'Solo un administrador puede importar el Excel');
+  if (!Buffer.isBuffer(req.body) || !req.body.length) throw new HttpError(400, 'Selecciona un archivo de Excel');
+  const resumen = await importarExcel(db, req.body, {
+    usuario: req.usuario.nombre, registrar, cambiarTramo, asegurarOnboarding, ajustarCerrados,
+  });
+  res.json(resumen);
 });
 
 // --- Prospectos sin vacante ---

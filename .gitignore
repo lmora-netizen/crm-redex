@@ -26,3 +26,6 @@ Thumbs.db
 desktop.ini
 .vscode/
 .idea/
+
+# Plantillas de Excel generadas
+*.xlsx

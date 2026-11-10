@@ -373,3 +373,7 @@ dialog:has(.formulario.amplio) { width: min(820px, calc(100vw - 32px)); }
 .prospectos-cab { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 8px; }
 .prospectos-cab h3 { font-size: 13px; }
 .prospectos .sub { margin: 0; }
+a.btn { text-decoration: none; color: inherit; display: inline-block; }
+label.btn { display: inline-block; }
+.avisos { margin: 0; padding-left: 18px; max-height: 220px; overflow: auto; }
+.avisos li { margin-bottom: 4px; }

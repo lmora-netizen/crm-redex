@@ -317,6 +317,9 @@ function renderTablero(el) {
             <button data-agrupar="1" class="${agrupar ? 'activo' : ''}">Por reclutador</button>
             <button data-agrupar="0" class="${agrupar ? '' : 'activo'}">Lista</button>
           </div>
+          <a class="btn" href="/api/plantilla" title="Plantilla con instrucciones, ejemplos y menús">Descargar plantilla Excel</a>
+          ${esAdmin() ? `<label class="btn" title="Crea y actualiza vacantes, proveedores y onboarding; no borra nada">Importar Excel
+            <input type="file" id="archivo-excel" accept=".xlsx" hidden></label>` : ''}
           <button class="btn primario" data-accion="nueva-vacante">+ Nueva vacante</button>
         </div>
       </div>
@@ -346,6 +349,7 @@ function renderTablero(el) {
     }).join('') || '<section class="panel"><p class="vacio">No hay vacantes con estos filtros.</p></section>' : ''}`;
 
   el.onchange = e => {
+    if (e.target.id === 'archivo-excel') return importarArchivo(e.target.files[0]);
     const f = e.target.dataset.filtro;
     if (f) { datos.filtros[f] = e.target.value; render(); }
   };
@@ -370,6 +374,38 @@ function renderTablero(el) {
         'Vacante eliminada');
     }
   };
+}
+
+async function importarArchivo(archivo) {
+  if (!archivo) return;
+  aviso(`Importando ${archivo.name}…`);
+  try {
+    const r = await fetch('/api/importar-excel', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: archivo });
+    const res = await r.json().catch(() => null);
+    if (!r.ok) throw new Error(res?.error || `Error ${r.status}`);
+    await cargar();
+    const modal = $('#modal');
+    const p = res.proveedores;
+    modal.innerHTML = `
+      <div class="formulario">
+        <header><h3>Importación terminada</h3><button type="button" class="cerrar" aria-label="Cerrar">×</button></header>
+        <div class="cuerpo">
+          <div class="cifras">
+            <div><strong>${res.vacantes.creadas} / ${res.vacantes.actualizadas}</strong><span>Vacantes nuevas / actualizadas</span></div>
+            <div><strong>${p.creados} / ${p.actualizados}</strong><span>Proveedores nuevos / actualizados</span></div>
+            <div><strong>${p.cambiosEtapa}</strong><span>Cambios de etapa</span></div>
+            <div><strong>${res.onboarding.actualizados}</strong><span>Onboarding actualizados</span></div>
+          </div>
+          ${p.sinVacante ? `<p class="sub">${plural(p.sinVacante, 'proveedor quedó', 'proveedores quedaron')} en «Prospectos sin vacante».</p>` : ''}
+          ${res.avisos.length ? `<h4 class="seccion-form">Revisa estas filas</h4><ul class="avisos">${res.avisos.map(a => `<li>${esc(a)}</li>`).join('')}</ul>` : '<p class="sub">Todas las filas se importaron sin observaciones.</p>'}
+        </div>
+        <footer><button type="button" class="btn primario" data-cerrar>Listo</button></footer>
+      </div>`;
+    modal.querySelector('.cerrar').onclick = modal.querySelector('[data-cerrar]').onclick = () => modal.close();
+    if (!modal.open) modal.showModal();
+  } catch (err) {
+    aviso(err.message, true);
+  }
 }
 
 function formVacante(v, despues) {
