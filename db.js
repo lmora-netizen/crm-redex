@@ -89,6 +89,22 @@ CREATE TABLE IF NOT EXISTS etapas_asignacion (
 );
 CREATE INDEX IF NOT EXISTS etapas_asignacion_id ON etapas_asignacion (asignacion_id);
 
+-- Sincronización con la hoja de Google: huella de cada fila para aplicar solo lo que cambió
+CREATE TABLE IF NOT EXISTS sincronizacion_filas (
+  hoja TEXT NOT NULL,
+  clave TEXT NOT NULL,
+  huella TEXT NOT NULL,
+  PRIMARY KEY (hoja, clave)
+);
+
+CREATE TABLE IF NOT EXISTS sincronizaciones (
+  id INTEGER PRIMARY KEY,
+  fecha TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+  estado TEXT NOT NULL,   -- ok, sin_cambios, error
+  modificado TEXT,        -- última modificación de la hoja en Google
+  detalle TEXT            -- resumen JSON o mensaje de error
+);
+
 -- Proveedores reportados para una vacante que aún no existe en el tablero;
 -- al asignarlos a una vacante pasan a las etapas de contratación
 CREATE TABLE IF NOT EXISTS prospectos (

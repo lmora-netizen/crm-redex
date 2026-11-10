@@ -3,6 +3,7 @@
 // Plantilla de Excel para capturar vacantes, proveedores y onboarding, y su importación.
 // La importación nunca borra: crea lo nuevo y actualiza lo que ya existe.
 
+const crypto = require('node:crypto');
 const ExcelJS = require('exceljs');
 const { ESTADOS, dia } = require('./db');
 const { limpio, dinero, entero, fecha, avance, tipoVehiculo, capitalizar } = require('./importar-hoja');
@@ -296,7 +297,22 @@ const campo = (fila, ...nombres) => {
   return null;
 };
 
-async function importarExcel(db, buffer, { usuario, registrar, cambiarTramo, asegurarOnboarding, ajustarCerrados }) {
+// Identidad de una fila (qué registro es) y su huella (qué contiene), para la sincronización
+function claveFila(hoja, f) {
+  const partes = {
+    vacantes: [campo(f, 'cliente'), campo(f, 'localidad', 'ciudad'), campo(f, 'tipo de vehiculo'), campo(f, 'asignado', 'reclutador')],
+    proveedores: [campo(f, 'cliente'), campo(f, 'ciudad', 'localidad'), campo(f, 'proveedor')],
+    onboarding: [campo(f, 'proveedor'), campo(f, 'cliente'), campo(f, 'ciudad')],
+  }[hoja];
+  return partes.map(normal).join('|');
+}
+function huellaFila(f) {
+  const datos = Object.entries(f).filter(([k]) => k !== '_fila')
+    .map(([k, v]) => [k, v instanceof Date ? v.toISOString() : v]);
+  return crypto.createHash('sha1').update(JSON.stringify(datos)).digest('hex');
+}
+
+async function importarExcel(db, buffer, { usuario, registrar, cambiarTramo, asegurarOnboarding, ajustarCerrados, origen = 'Excel', soloCambios = false }) {
   const libro = new ExcelJS.Workbook();
   try {
     await libro.xlsx.load(buffer);
@@ -306,6 +322,22 @@ async function importarExcel(db, buffer, { usuario, registrar, cambiarTramo, ase
   const hojas = { vacantes: leerHoja(libro, 'Vacantes'), proveedores: leerHoja(libro, 'Proveedores'), onboarding: leerHoja(libro, 'Onboarding') };
   if (!hojas.vacantes && !hojas.proveedores && !hojas.onboarding) {
     throw Object.assign(new Error('No encontré las hojas Vacantes, Proveedores u Onboarding. Usa la plantilla del tablero.'), { status: 400 });
+  }
+
+  // En la sincronización solo se aplican las filas que cambiaron en la hoja desde la vez anterior,
+  // así no se pisan los cambios hechos directamente en el tablero
+  const huellasNuevas = [];
+  if (soloCambios) {
+    const guardada = db.prepare('SELECT huella FROM sincronizacion_filas WHERE hoja = ? AND clave = ?');
+    for (const [hoja, filas] of Object.entries(hojas)) {
+      if (!filas) continue;
+      hojas[hoja] = filas.filter(f => {
+        const clave = claveFila(hoja, f), huella = huellaFila(f);
+        if (guardada.get(hoja, clave)?.huella === huella) return false;
+        huellasNuevas.push([hoja, clave, huella]);
+        return true;
+      });
+    }
   }
 
   const resumen = {
@@ -394,7 +426,7 @@ async function importarExcel(db, buffer, { usuario, registrar, cambiarTramo, ase
         const cols = Object.keys(fila);
         const r = db.prepare(`INSERT INTO vacantes (${cols}) VALUES (${cols.map(c => ':' + c)})`).run(fila);
         registrar({ usuario: { nombre: usuario } }, 'vacante_creada', { vacante_id: Number(r.lastInsertRowid), reclutador_id: fila.reclutador_id },
-          `Excel: nueva vacante ${cliente} · ${ciudad} · ${tipoTexto} (${fila.cantidad} u.)`);
+          `${origen}: nueva vacante ${cliente} · ${ciudad} · ${tipoTexto} (${fila.cantidad} u.)`);
         resumen.vacantes.creadas += 1;
       }
     }
@@ -458,7 +490,7 @@ async function importarExcel(db, buffer, { usuario, registrar, cambiarTramo, ase
         asegurarOnboarding(id, { estado: etapa, fecha_disponibilidad: disponibilidad });
         ajustarCerrados(vacante.id, etapa === 'Operando' ? unidades : 0);
         registrar(quien, 'asignacion_creada', { vacante_id: vacante.id, asignacion_id: id, reclutador_id: reclutadorId, nuevo: etapa },
-          `Excel: nuevo proveedor ${proveedor} (${unidades} u.) en ${etapa}`);
+          `${origen}: nuevo proveedor ${proveedor} (${unidades} u.) en ${etapa}`);
         resumen.proveedores.creados += 1;
       } else {
         const aporteAntes = antes.estado === 'Operando' ? antes.unidades : 0;
@@ -471,7 +503,7 @@ async function importarExcel(db, buffer, { usuario, registrar, cambiarTramo, ase
         if (cambiaEtapa) {
           cambiarTramo(antes.id, etapa, momento);
           registrar(quien, 'cambio_estado', { vacante_id: vacante.id, asignacion_id: antes.id, reclutador_id: reclutadorId, ant: antes.estado, nuevo: etapa },
-            `Excel: ${proveedor} pasó de ${antes.estado} a ${etapa}`);
+            `${origen}: ${proveedor} pasó de ${antes.estado} a ${etapa}`);
           resumen.proveedores.cambiosEtapa += 1;
         }
         asegurarOnboarding(antes.id, { estado: etapa, fecha_disponibilidad: disponibilidad });
@@ -522,8 +554,13 @@ async function importarExcel(db, buffer, { usuario, registrar, cambiarTramo, ase
     }
 
     const total = resumen.vacantes.creadas + resumen.vacantes.actualizadas + resumen.proveedores.creados + resumen.proveedores.actualizados + resumen.onboarding.actualizados;
-    registrar({ usuario: { nombre: usuario } }, 'importacion', {},
-      `Importación de Excel: ${total} registros (${resumen.proveedores.creados} proveedores nuevos, ${resumen.proveedores.cambiosEtapa} cambios de etapa)`);
+    resumen.total = total;
+    if (total) {
+      registrar({ usuario: { nombre: usuario } }, 'importacion', {},
+        `Importación desde ${origen}: ${total} registros (${resumen.proveedores.creados} proveedores nuevos, ${resumen.proveedores.cambiosEtapa} cambios de etapa)`);
+    }
+    const guardar = db.prepare('INSERT OR REPLACE INTO sincronizacion_filas (hoja, clave, huella) VALUES (?, ?, ?)');
+    for (const h of huellasNuevas) guardar.run(...h);
     db.exec('COMMIT');
   } catch (err) {
     db.exec('ROLLBACK');
