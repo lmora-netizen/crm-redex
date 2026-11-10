@@ -50,6 +50,31 @@ Reemplaza clientes, localidades, tipos de vehículo y vacantes; conserva usuario
 
 Para volver a los datos demo (borra todo salvo los usuarios): `npm run seed -- --confirmar`.
 
+## Sincronización automática con Google Sheets
+
+El tablero puede leer la plantilla desde una hoja de Google cada pocos minutos, sin descargar ni subir archivos. La hoja sigue privada: se comparte solo con una cuenta de servicio.
+
+1. En [Google Cloud Console](https://console.cloud.google.com/) crea un proyecto (por ejemplo «CRM Redex»).
+2. En **APIs y servicios → Biblioteca**, habilita **Google Drive API**.
+3. En **IAM y administración → Cuentas de servicio**, crea una cuenta (por ejemplo «tablero-crm»). No necesita roles.
+4. Entra a la cuenta → **Claves → Agregar clave → Crear clave nueva → JSON**. Se descarga un archivo `.json`.
+5. Guarda ese archivo en `credenciales/cuenta-servicio.json` dentro del proyecto (la carpeta no se sube al repositorio).
+6. Sube la plantilla a Drive y conviértela: ábrela con Hojas de cálculo de Google y usa **Archivo → Guardar como Hojas de cálculo de Google**.
+7. En la hoja, **Compartir** con el correo de la cuenta de servicio (termina en `iam.gserviceaccount.com`) como **Lector**.
+8. Agrega a `config.local.json`:
+
+```json
+"sincronizacion": {
+  "hoja": "https://docs.google.com/spreadsheets/d/<id>/edit",
+  "credenciales": "credenciales/cuenta-servicio.json",
+  "minutos": 5
+}
+```
+
+9. Reinicia el tablero. En la pestaña Tablero verás «Google Sheets · sincronizado hace…» y el botón «Sincronizar ahora».
+
+Cada sincronización aplica solo las filas que cambiaron en la hoja desde la vez anterior, así que un cambio hecho directamente en el tablero se respeta hasta que esa fila se modifique en la hoja.
+
 ## Red local
 
 Para que otros reclutadores de la misma red entren desde su equipo, inicia el servidor con `$env:HOST='0.0.0.0'; npm start` (PowerShell) y comparte `http://<ip-de-este-equipo>:3000`. Cada persona entra con el usuario que le creó el administrador.
@@ -59,5 +84,7 @@ Para que otros reclutadores de la misma red entren desde su equipo, inicia el se
 - `server.js`: API REST (Express), bitácora de movimientos y tramos por etapa.
 - `auth.js`: inicio de sesión, sesiones y gestión de usuarios.
 - `db.js`: esquema SQLite, migraciones y datos demo.
-- `importar-hoja.js`: importación de vacantes desde Google Sheets.
+- `importar-hoja.js`: importación inicial de vacantes desde la hoja de capacidad.
+- `excel.js`: plantilla de Excel e importación (botones del Tablero).
+- `sincronizacion.js`: lectura automática de la hoja de Google con la cuenta de servicio.
 - `public/`: interfaz web (HTML, CSS y JavaScript sin compilación); `public/img/` tiene el logo y el fondo.
